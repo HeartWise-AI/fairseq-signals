@@ -61,6 +61,8 @@ def main(cfg: DictConfig, override_args=None):
         suffix=cfg.checkpoint.checkpoint_suffix
     )
 
+    torch.save(model, '/media/data1/achilsowa/models/model.pt')
+
     logger.info(
         "num. shared model params: {:,} (num. trained: {:,})".format(
             sum(p.numel() for p in model.parameters() if not getattr(p, "expert", False)),

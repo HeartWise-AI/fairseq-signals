@@ -5,7 +5,7 @@ common:
   wandb_project: wav2vec2-pretraining
 
 checkpoint:
-  save_dir: checkpoints-50k
+  save_dir: checkpoints-all
   save_interval: 1
   keep_last_epochs: 5
   save_interval_updates: 0

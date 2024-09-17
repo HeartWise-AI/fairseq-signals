@@ -10,9 +10,12 @@ from omegaconf import MISSING, II, OmegaConf
 
 from fairseq_signals.data import (    
     FileECGDataset,
+    NpECGDataset,
+    DataframeECGDataset,
     CMSCECGDataset,
     PerturbECGDataset,
-    ThreeKGECGDataset
+    ThreeKGECGDataset,
+    
 )
 from fairseq_signals.dataclass import Dataclass
 
@@ -257,7 +260,33 @@ class ECGPretrainingTask(Task):
         task_cfg = task_cfg or self.cfg
 
         manifest_path = os.path.join(data_path, "{}.tsv".format(split))
-        if "cmsc" in task_cfg.criterion_name:
+        #ext = data_path.split(".")[-1]
+        #if ext == "npy":
+        #    self.datasets[split] = NpECGDataset(
+        #        ecg_file=data_path,
+        #        sample_rate=task_cfg.get("sample_rate", self.cfg.sample_rate),
+        #        perturbation_mode=self.cfg.perturbation_mode,
+        #        max_sample_size=self.cfg.max_sample_size,
+        #        min_sample_size=self.cfg.min_sample_size,
+        #        pad=task_cfg.enable_padding,
+        #        pad_leads=task_cfg.enable_padding_leads,
+        #        leads_to_load=task_cfg.leads_to_load,
+        #        filter=task_cfg.filter,
+        #        normalize=task_cfg.normalize,
+        #        mean_path=task_cfg.get("mean_path", self.cfg.mean_path),
+        #        std_path=task_cfg.get("std_path", self.cfg.std_path),
+        #        num_buckets=self.cfg.num_batch_buckets,
+        #        compute_mask_indices=self.cfg.precompute_mask_indices,
+        #        leads_bucket=self.cfg.leads_bucket,
+        #        bucket_selection=self.cfg.bucket_selection,
+        #        training=True if 'train' in split else False,
+        #        **self._get_mask_precompute_kwargs(task_cfg),
+        #        **self._get_perturbation_kwargs(),
+        #        **kwargs, 
+        #    )
+        if False:
+            pass
+        elif "cmsc" in task_cfg.criterion_name:
             self.datasets[split] = CMSCECGDataset(
                 manifest_path=manifest_path,
                 sample_rate=task_cfg.get("sample_rate", self.cfg.sample_rate),

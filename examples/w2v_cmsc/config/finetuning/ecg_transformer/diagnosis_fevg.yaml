@@ -8,7 +8,7 @@ common:
   wandb_project: diagnosis-prediction
 
 checkpoint:
-  save_dir: checkpoints
+  save_dir: checkpoints-fevg
   # best_checkpoint_metric: cinc_score
   # maximize_best_checkpoint_metric: true
   save_interval: 1
@@ -60,7 +60,7 @@ lr_scheduler:
 model:
   _name: ecg_transformer_classifier
   model_path: null
-  num_labels: 
+  num_labels: 2 #77
   no_pretrained_weights: false
 
   dropout: 0.0

@@ -25,6 +25,7 @@ class FinetuningModel(BaseModel):
     def __init__(self, cfg: FinetuningConfig, encoder: BaseModel):
         super().__init__()
         self.cfg = cfg
+        print('#'*10, cfg)
         self.encoder = encoder
 
     def set_num_updates(self, num_updates):

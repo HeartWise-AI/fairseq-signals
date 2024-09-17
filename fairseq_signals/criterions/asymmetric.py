@@ -1,5 +1,4 @@
 import math
-from collections import Counter
 from argparse import Namespace
 from dataclasses import dataclass, field
 from omegaconf import II
@@ -13,30 +12,18 @@ from fairseq_signals import logging, metrics, meters
 from fairseq_signals.data.ecg import ecg_utils
 from fairseq_signals.utils import utils
 from fairseq_signals.criterions import BaseCriterion, register_criterion
-from fairseq_signals.criterions.binary_cross_entropy import BinaryCrossEntropyCriterionConfig, BinaryCrossEntropyCriterion
 from fairseq_signals.dataclass import Dataclass
 from fairseq_signals.tasks import Task
 from fairseq_signals.logging.meters import safe_round
 
 @dataclass
-class BinaryCrossEntropyWithLogitsCriterionConfig(BinaryCrossEntropyCriterionConfig):
-    auc_average: str = field(
-        default="macro",
-        metadata={
-            "help": "determines the type of averaging performed on the data, "
-                "should be one of ['micro', 'macro']"
-        }
-    )
-    pos_weight: Optional[List[float]] = field(
+class AsymmetricCriterionConfig(Dataclass):
+    weight: Optional[List[float]] = field(
         default = None,
         metadata = {
-            "help": "a weight of positive examples. Must be a vector with length equal to the"
-            "number of classes."
+            "help": "a manual rescaling weight given to the loss of each batch element."
+            "if given, has to be a float list of size nbatch."
         }
-    )
-    report_cinc_score: bool = field(
-        default=False,
-        metadata={"help": "whether to report cinc challenge metric"}
     )
     weights_file: Optional[str] = field(
         default=None,
@@ -50,31 +37,61 @@ class BinaryCrossEntropyWithLogitsCriterionConfig(BinaryCrossEntropyCriterionCon
             "help": "additionally log metrics for each of these keys, only applied for acc, auc, f1score"
         }
     )
+    gamma_neg: float = field(
+        default=4,
+        metadata={"help": ""}
+    )
+    gamma_pos: float = field(
+        default=0,
+        metadata={"help": ""}
+    )
+    clip: float = field(
+        default=0.05,
+        metadata={"help": ""}
+    )
+    eps: float = field(
+        default=1e-8,
+        metadata={"help": ""}
+    )
+    disable_torch_grad_focal_loss: bool = field(
+        default=False,
+        metadata={"help": ""}
+    )
+    threshold: float = field(
+        default=0.5,
+        metadata={"help": "threshold value for measuring accuracy"}
+    )
+    report_auc: bool = field(
+        default=False,
+        metadata={"help": "whether to report auprc / auroc metric, used for valid step"}
+    )
+    report_cinc_score: bool = field(
+        default=False,
+        metadata={"help": "whether to report cinc challenge metric"}
+    )
 
 @register_criterion(
-    "binary_cross_entropy_with_logits", dataclass = BinaryCrossEntropyWithLogitsCriterionConfig
+    "asymmetric", dataclass = AsymmetricCriterionConfig
 )
-class BinaryCrossEntropyWithLogitsCriterion(BinaryCrossEntropyCriterion):
-    def __init__(self, cfg: BinaryCrossEntropyWithLogitsCriterionConfig, task: Task):
-        super().__init__(cfg, task)
-        self.auc_average = cfg.auc_average
+class AsymmetricCriterion(BaseCriterion):
+    def __init__(self, cfg: AsymmetricCriterionConfig, task: Task):
+        super().__init__(task)
+        self.threshold = cfg.threshold
+        self.weight = cfg.weight
+        self.report_auc = cfg.report_auc
+        self.gamma_neg = cfg.gamma_neg
+        self.gamma_pos = cfg.gamma_pos
+        self.clip = cfg.clip
+        self.disable_torch_grad_focal_loss = cfg.disable_torch_grad_focal_loss
+        self.eps = cfg.eps
 
-        if cfg.pos_weight is None:
-            self.pos_weight = None
-        else:
-            self.pos_weight = torch.tensor(cfg.pos_weight)
 
-        self.report_cinc_score = cfg.report_cinc_score
-        if self.report_cinc_score:
-            assert cfg.weights_file
-            classes, self.score_weights = (
-                ecg_utils.get_physionet_weights(cfg.weights_file)
-            )
-            self.sinus_rhythm_index = ecg_utils.get_sinus_rhythm_index(classes)
+        # prevent memory allocation and gpu uploading every iteration, and encourages inplace operations
+        self.targets = self.anti_targets = self.xs_pos = self.xs_neg = self.asymmetric_w = (
+            self.loss
+        ) = None
 
-        self.per_log_keys = cfg.per_log_keys
-
-    def forward(self, model, sample, reduce=True, save_outputs=False):
+    def forward(self, model, sample, reduce = True, save_outputs=False):
         """Compute the loss for the given sample.
         
         Returns a tuple with three elements.
@@ -84,23 +101,43 @@ class BinaryCrossEntropyWithLogitsCriterion(BinaryCrossEntropyCriterion):
         """
         net_output = model(**sample["net_input"])
         logits = model.get_logits(net_output).float()
+        probs = torch.sigmoid(logits)
         target = model.get_targets(sample, net_output)
         if save_outputs:
             self.store(logits, target)
 
+        self.targets = target
+        self.anti_targets = 1 - target
+
+        # Calculating Probabilities
+        self.xs_pos = probs
+        self.xs_neg = 1.0 - self.xs_pos
+
+        # Asymmetric Clipping
+        if self.clip is not None and self.clip > 0:
+            self.xs_neg.add_(self.clip).clamp_(max=1)
+
+        # Basic CE calculation
+        self.loss = self.targets * torch.log(self.xs_pos.clamp(min=self.eps))
+        self.loss.add_(self.anti_targets * torch.log(self.xs_neg.clamp(min=self.eps)))
+
+        # Asymmetric Focusing
+        if self.gamma_neg > 0 or self.gamma_pos > 0:
+            if self.disable_torch_grad_focal_loss:
+                torch.set_grad_enabled(False)
+            self.xs_pos = self.xs_pos * self.targets
+            self.xs_neg = self.xs_neg * self.anti_targets
+            self.asymmetric_w = torch.pow(
+                1 - self.xs_pos - self.xs_neg,
+                self.gamma_pos * self.targets + self.gamma_neg * self.anti_targets,
+            )
+            if self.disable_torch_grad_focal_loss:
+                torch.set_grad_enabled(True)
+            self.loss *= self.asymmetric_w
+
         reduction = "none" if not reduce else "sum"
 
-        if self.pos_weight is not None:
-            self.pos_weight = self.pos_weight.to(logits.device)
-
-
-        loss = F.binary_cross_entropy_with_logits(
-            input=logits,
-            target=target,
-            weight=self.weight,
-            pos_weight=self.pos_weight,
-            reduction=reduction
-        )
+        loss = -self.loss.sum() if reduce else -self.loss
 
         if 'sample_size' in sample:
             sample_size = sample['sample_size']
@@ -108,218 +145,47 @@ class BinaryCrossEntropyWithLogitsCriterion(BinaryCrossEntropyCriterion):
             sample_size = sample['net_input']['mask_indices'].sum()
         else:
             sample_size = target.long().sum().item()
-
+        
         logging_output = {
             "loss": loss.item() if reduce else loss.detach(),
             "nsignals": sample["id"].numel(),
             "sample_size": sample_size
         }
 
-        per_log_keys = []
-        for plk in self.per_log_keys:
-            if plk in sample:
-                per_log_keys.append(plk)
-                logging_output[plk + "_em_count"] = dict()
-                logging_output[plk + "_em_correct"] = dict()
-                logging_output[plk + "_tp"] = dict()
-                logging_output[plk + "_fp"] = dict()
-                logging_output[plk + "_fn"] = dict()
-                if not self.training and self.report_auc:
-                    logging_output[plk + "_y_score"] = dict()
-                    logging_output[plk + "_y_true"] = dict()
-                    logging_output[plk + "_y_class"] = dict()
-        
         with torch.no_grad():
             probs = torch.sigmoid(logits)
-            outputs = probs > self.threshold
+            outputs = (probs > 0.5)
 
             if probs.numel() == 0:
                 corr = 0
                 count = 0
-                em_count = 0
-                em_corr = 0
                 tp = 0
+                tn = 0
                 fp = 0
                 fn = 0
             else:
-                if "valid_classes" in sample:
-                    y_true = []
-                    y_score = []
-                    y_class = []
-                    
-                    corr = 0
-                    count = 0
-                    em_count = 0
-                    em_corr = 0
-                    tp = 0
-                    fp = 0
-                    fn = 0
-                    for logit, prob, output, gt, classes in zip(
-                        logits, probs, outputs, target, sample["valid_classes"]
-                    ):
-                        logit = logit[classes]
-                        prob = prob[classes]
-                        output = output[classes]
-                        gt = gt[classes]
+                count = float(probs.numel())
+                corr = (outputs == target).sum().item()
 
-                        true = torch.where(gt == 1)
-                        false = torch.where(gt == 0)
-                        tp += output[true].sum()
-                        fn += output[true].numel() - output[true].sum()
-                        fp += output[false].sum()
-
-                        em_count += 1
-                        count += len(classes)
-
-                        output = (output == gt)
-                        corr += output.sum().item()
-                        if output.all():
-                            em_corr += 1
-
-                        if not self.training and self.report_auc:
-                            _y_true = gt.cpu().numpy()
-                            _y_class = classes.cpu().numpy()
-                            _y_score = prob.cpu().numpy()
-
-                            y_true.append(_y_true)
-                            y_score.append(_y_score)
-                            if self.auc_average == "macro":
-                                y_class.append(_y_class)
-                    
-                    if len(y_true) > 0:
-                        y_true = np.concatenate(y_true)
-                        y_score = np.concatenate(y_score)
-                        if len(y_class) > 0:
-                            y_class = np.concatenate(y_class)
-                        else:
-                            y_class = np.array([])
-                else:
-                    count = float(probs.numel())
-                    corr = (outputs == target).sum().item()
-                    em_count = probs.size(0)
-                    em_corr = (outputs == target).all(axis=-1).sum().item()
-
-                    true = torch.where(target == 1)
-                    false = torch.where(target == 0)
-                    tp = outputs[true].sum()
-                    fn = outputs[true].numel() - tp
-                    fp = outputs[false].sum()
-
-                    if not self.training and self.report_auc:
-                        y_true = target.cpu().numpy()
-                        y_score = probs.cpu().numpy()
+                true = torch.where(target == 1)
+                false = torch.where(target == 0)
+                tp = outputs[true].sum()
+                fn = outputs[true].numel() - tp
+                fp = outputs[false].sum()
+                tn = outputs[false].numel() - fp
 
             logging_output["correct"] = corr
             logging_output["count"] = count
-            logging_output["em_correct"] = em_corr
-            logging_output["em_count"] = em_count
-            if tp == 0 or fp == 0 or fn == 0:
-                logging_output["tp"] = tp
-                logging_output["fp"] = fp
-                logging_output["fn"] = fn
-            else:
-                logging_output["tp"] = tp.item()
-                logging_output["fp"] = fp.item()
-                logging_output["fn"] = fn.item()
 
-            if self.report_cinc_score:
-                labels = target.cpu().numpy()
+            logging_output["tp"] = tp.item()
+            logging_output["fp"] = fp.item()
+            logging_output["tn"] = tn.item()
+            logging_output["fn"] = fn.item()
 
-                observed_score = (
-                    ecg_utils.compute_scored_confusion_matrix(
-                        self.score_weights,
-                        labels,
-                        outputs.cpu().numpy()
-                    )
-                )
-                correct_score = (
-                    ecg_utils.compute_scored_confusion_matrix(
-                        self.score_weights,
-                        labels,
-                        labels
-                    )
-                )
-                inactive_outputs = np.zeros(outputs.size(), dtype=bool)
-                inactive_outputs[:, self.sinus_rhythm_index] = 1
-                inactive_score = (
-                    ecg_utils.compute_scored_confusion_matrix(
-                        self.score_weights,
-                        labels,
-                        inactive_outputs
-                    )
-                )
-
-                logging_output["o_score"] = observed_score
-                logging_output["c_score"] = correct_score
-                logging_output["i_score"] = inactive_score
-
-            for plk in per_log_keys:
-                plk_ids = [log_id.item() for log_id in sample[plk]]
-                for i, plk_id in enumerate(plk_ids):
-                    # NOTE -1 denotes for missing id that should be skipped in the aggregation
-                    if plk_id == -1:
-                        continue
-
-                    if "valid_classes" in sample:
-                        classes = sample["valid_classes"][i]
-                        logit = logits[i][classes]
-                        prob = probs[i][classes]
-                        gt = target[i][classes]
-                    else:
-                        classes = np.arange(len(logits[i]))
-                        logit = logits[i]
-                        prob = probs[i]
-                        gt = target[i]
-
-                    output = (prob > self.threshold)
-
-                    if plk_id not in logging_output[plk + "_em_count"]:
-                        logging_output[plk + "_em_count"][plk_id] = 0
-                        logging_output[plk + "_em_correct"][plk_id] = 0
-                        logging_output[plk + "_tp"][plk_id] = 0
-                        logging_output[plk + "_fp"][plk_id] = 0
-                        logging_output[plk + "_fn"][plk_id] = 0
-                        if not self.training and self.report_auc:
-                            logging_output[plk + "_y_score"][plk_id] = []
-                            logging_output[plk + "_y_true"][plk_id] = []
-                            logging_output[plk + "_y_class"][plk_id] = []
-
-                    true = torch.where(gt == 1)
-                    false = torch.where(gt == 0)
-                    logging_output[plk + "_tp"][plk_id] += output[true].sum().item()
-                    logging_output[plk + "_fn"][plk_id] += output[true].numel() - output[true].sum().item()
-                    logging_output[plk + "_fp"][plk_id] += output[false].sum().item()
-
-                    logging_output[plk + "_em_count"][plk_id] += 1
-                    output = (output == gt)
-                    if output.all():
-                        logging_output[plk + "_em_correct"][plk_id] += 1
-
-                    if not self.training and self.report_auc:
-                        _y_true = gt.cpu().numpy()
-                        _y_score = prob.cpu().numpy()
-                        
-                        logging_output[plk + "_y_true"][plk_id].append(_y_true)
-                        logging_output[plk + "_y_score"][plk_id].append(_y_score)
-                        if self.auc_average == "macro":
-                            _y_class = classes.cpu().numpy()
-                            logging_output[plk + "_y_class"][plk_id].append(_y_class)
-
-                if not self.training and self.report_auc:
-                    for plk_id in logging_output[plk + "_y_score"].keys():
-                        logging_output[plk + "_y_true"][plk_id] = np.concatenate(
-                            logging_output[plk + "_y_true"][plk_id]
-                        )
-                        logging_output[plk + "_y_score"][plk_id] = np.concatenate(
-                            logging_output[plk + "_y_score"][plk_id]
-                        )
-                        if self.auc_average == "macro":
-                            logging_output[plk + "_y_class"][plk_id] = np.concatenate(
-                                logging_output[plk + "_y_class"][plk_id]
-                            )
-                        else:
-                            logging_output[plk + "_y_class"][plk_id] = np.array([])
-
+            if not self.training and self.report_auc:
+                logging_output["_y_true"] = target.cpu().numpy()
+                logging_output["_y_score"] = probs.cpu().numpy()
+        
         return loss, sample_size, logging_output
 
     @staticmethod

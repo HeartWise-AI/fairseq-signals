@@ -1,0 +1,70 @@
+
+common:
+  fp16: true #false
+  log_format: json
+  log_interval: 10
+  all_gather_list_size: 2048000
+  #wandb_entity: ecg-pretraining
+  #wandb_project: diagnosis-prediction
+
+checkpoint:
+  save_dir: checkpoints
+  # best_checkpoint_metric: cinc_score
+  # maximize_best_checkpoint_metric: true
+  save_interval: 5
+  keep_last_epochs: 0
+  save_interval_updates: 0
+  no_epoch_checkpoints: false
+  # patience: 30
+
+task:
+  _name: ecg_classification
+  data: ???
+  npy_dataset: true
+  normalize: false
+  enable_padding: true
+  enable_padding_leads: false
+  leads_to_load: null
+    # I, II, III, aVR, aVL, aVF, V1, V2, V3, V4, V5, V6
+
+dataset:
+  num_workers: 6
+  max_tokens: null 
+  batch_size: 128
+  valid_subset: "valid,test"
+
+distributed_training:
+  distributed_world_size: 1
+
+criterion:
+  _name: binary_cross_entropy_with_logits
+  report_auc: true
+  report_cinc_score: false
+  weights_file: ???
+  per_log_keys: ['Acute pericarditis', 'QS complex in V1-V2-V3', 'T wave inversion (anterior - V3-V4)', 'Right atrial enlargement','2nd degree AV block - mobitz 1','Left posterior fascicular block','Wolff-Parkinson-White (Pre-excitation syndrome)','Junctional rhythm','Premature ventricular complex',"rSR' in V1-V2",'Right superior axis','ST elevation (inferior - II, III, aVF)','Afib','ST elevation (anterior - V3-V4)','RV1 + SV6 > 11 mm','Sinusal','Monomorph','Delta wave','R/S ratio in V1-V2 >1','Third Degree AV Block','LV pacing','Nonspecific intraventricular conduction delay','ST depression (inferior - II, III, aVF)','Regular','Premature atrial complex','2nd degree AV block - mobitz 2','Left anterior fascicular block','Q wave (septal- V1-V2)','Prolonged QT','Left axis deviation','Left ventricular hypertrophy','ST depression (septal- V1-V2)','Supraventricular tachycardia','Atrial paced','Q wave (inferior - II, III, aVF)','no_qrs','T wave inversion (lateral -I, aVL, V5-V6)','Right bundle branch block','ST elevation (septal - V1-V2)','SV1 + RV5 or RV6 > 35 mm','Right axis deviation','RaVL > 11 mm','Polymorph','Ventricular tachycardia','QRS complex negative in III','ST depression (lateral - I, avL, V5-V6)','1st degree AV block','Lead misplacement','Q wave (posterior - V7-V9)','Atrial flutter','Ventricular paced','ST elevation (posterior - V7-V8-V9)','Ectopic atrial rhythm (< 100 BPM)','Early repolarization','Ventricular Rhythm','Irregularly irregular','Atrial tachycardia (>= 100 BPM)','R complex in V5-V6','ST elevation (lateral - I, aVL, V5-V6)','Brugada','Bi-atrial enlargement','Q wave (lateral- I, aVL, V5-V6)','ST upslopping','T wave inversion (inferior - II, III, aVF)','Regularly irregular','Bradycardia','qRS in V5-V6-I, aVL','Q wave (anterior - V3-V4)','Acute MI','ST depression (anterior - V3-V4)','Right ventricular hypertrophy','T wave inversion (septal- V1-V2)','ST downslopping','Left bundle branch block','Low voltage','U wave','Left atrial enlargement']
+
+optimization:
+  max_epoch: 1
+  max_update: 320000
+  lr: [0.00005]
+
+optimizer:
+  _name: adam
+  adam_betas: (0.9, 0.98)
+  adam_eps: 1e-08
+
+lr_scheduler:
+  _name: fixed
+  warmup_updates: 0
+
+model:
+  _name: nejedly2021resnet_classifier #resnet18_classifier
+  model_path: null
+  num_labels: 77
+  no_pretrained_weights: true #false
+
+  indicate_leads: true
+  use_mha: true
+
+  final_dropout: 0.5
+  in_d: 12

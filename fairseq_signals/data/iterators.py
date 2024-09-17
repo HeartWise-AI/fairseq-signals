@@ -225,6 +225,7 @@ class EpochBatchIterator(EpochBatchIterating):
         """Return the epoch index after *next_epoch_itr* is called."""
         if self._next_epoch_itr is not None:
             self.epoch
+            return self.epoch # TODO: when pushing this, specify this is my add
         elif self._cur_epoch_itr is not None and self.end_of_epoch():
             return self.epoch + 1
         else:

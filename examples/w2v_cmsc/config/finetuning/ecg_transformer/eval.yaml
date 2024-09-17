@@ -15,7 +15,7 @@ checkpoint:
   keep_last_epochs: 1
   save_interval_updates: 0
   no_epoch_checkpoints: false
-  patience: 30
+  # patience: 30
 
 task:
   _name: ecg_classification
@@ -32,8 +32,8 @@ dataset:
   num_workers: 6
   max_tokens: null 
   batch_size: 128
-  valid_subset: "valid"
-
+  valid_subset: "test"
+  
 distributed_training:
   distributed_world_size: 1
 
@@ -69,5 +69,5 @@ model:
   # encoder_layerdrop: 0.1
 
   feature_grad_mult: 0.0
-  freeze_finetune_updates: 0
+  freeze_finetune_updates: 
   in_d: 12

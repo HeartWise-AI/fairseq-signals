@@ -4,7 +4,9 @@ import sys
 
 import wfdb
 import scipy.io
+import pickle
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn.functional as F
 
@@ -46,7 +48,7 @@ class RawECGDataset(BaseDataset):
         super().__init__()
 
         self.training = training
-
+        
         self.sample_rate = sample_rate
         self.perturbation_mode = perturbation_mode
         self.retain_original = True if perturbation_mode is not None else False
@@ -407,7 +409,7 @@ class FileECGDataset(RawECGDataset):
             sample_rate=sample_rate,
             **kwargs
         )
-
+        
         skipped = 0
         self.fnames = []
         sizes = []
@@ -474,7 +476,6 @@ class PathECGDataset(FileECGDataset):
         **kwargs
     ):
         super().__init__(manifest_path=manifest_path, sample_rate=sample_rate, **kwargs)
-    
         self.load_specific_lead = load_specific_lead
 
     def collator(self, samples):
@@ -559,3 +560,201 @@ class PathECGDataset(FileECGDataset):
             res["attribute_id"] = data["attribute_id"][0]
 
         return res
+
+
+class NpECGDataset(RawECGDataset):
+    def __init__(
+        self,
+        manifest_path,
+        sample_rate,
+        label_indexes=None,
+        num_buckets=0,
+        **kwargs
+    ):
+        super().__init__(
+            sample_rate=sample_rate,
+            **kwargs
+        )
+        
+        skipped = 0
+        self.fnames = []
+        sizes = []
+        self.skipped_indices = set()
+
+        with open(manifest_path, "r") as f:
+            for i, line in enumerate(f):
+                items = line.strip().split("\t")
+                assert len(items) == 2, line
+                key, value = items
+                if key == "x_path":
+                    self.ecg_file = value
+                elif key == "y_path":
+                    self.label_file = value
+                elif key == "label_indexes":
+                    self.label_indexes = eval(value)
+                elif key == "normalization":
+                    self.normalize = True
+                    mean, std = get_norm_from_pkl(value)
+                    self.mean = np.array(mean)[:, None]
+                    self.std = np.array(std)[:, None]        
+        
+        use_memmap, data = npy_load(data=None, filename=self.ecg_file)    
+        self.xdata = None if use_memmap else data
+        self.len = data.shape[0]
+        self.sizes = [data.shape[1]] * self.len 
+
+        if self.label:
+            use_memmap, data = npy_load(data=None, filename=self.label_file)    
+            self.ydata = None if use_memmap else data
+        
+
+        self.set_bucket_info(num_buckets)
+
+    def __getitem__(self, index):
+        res = {'id': index}
+
+        _, xdata = npy_load(data=self.xdata, filename=self.ecg_file)
+        x = xdata[index]
+        x = npy_tensor(x,)
+
+        curr_sample_rate = self.sample_rate
+        feats = torch.from_numpy(x)
+        res["source"] = self.postprocess(feats, curr_sample_rate)
+        if self.retain_original:
+            res["original"] = feats
+
+        if self.label:
+            _, ydata = npy_load(data=self.ydata, filename=self.label_file)
+            res["label"] = torch.from_numpy(ydata[index, self.label_indexes])
+        
+        return res
+
+    def __len__(self):
+        return self.len
+
+
+
+class DataframeECGDataset(RawECGDataset):
+    def __init__(
+        self,
+        manifest_path,
+        sample_rate,
+        label_indexes=None,
+        num_buckets=0,
+        **kwargs
+    ):
+        super().__init__(
+            sample_rate=sample_rate,
+            **kwargs
+        )
+        
+        skipped = 0
+        self.fnames = []
+        sizes = []
+        self.skipped_indices = set()
+
+        with open(manifest_path, "r") as f:
+            for i, line in enumerate(f):
+                items = line.strip().split(":")
+                assert len(items) == 2, f'{line}:\t {len(items)}'
+                key, value = items
+                if key == "x_path":
+                    self.ecg_file = value
+                if key == "x_shape":
+                    self.ecg_shape = eval(value)
+                elif key == "y_labels":
+                    self.y_labels = eval(value)
+                elif key == "normalization":
+                    self.normalize = True
+                    mean, std = get_norm_from_pkl(value)
+                    self.mean = np.array(mean)[:, None]
+                    self.std = np.array(std)[:, None]        
+        
+        ext = self.ecg_file.split(".")[-1]
+        if ext == "parquet":
+            self.data = pd.read_parquet(self.ecg_file)
+            self.len = len(self.data)
+        elif ext == "csv":
+            self.data = pd.read_csv(self.ecg_file)
+            self.len = len(self.data)
+        self.sizes = [self.ecg_shape[1]] * self.len 
+
+        if 'RV1 + SV6\xa0> 11 mm' in self.data.columns.tolist():
+            self.data.rename(columns={'RV1 + SV6\xa0> 11 mm': 'RV1 + SV6 > 11 mm'}, inplace=True)
+        self.data.reset_index(inplace=True, drop=True)
+        self.error_count = 0
+        self.set_bucket_info(num_buckets)
+
+    def __getitem__(self, index):
+        try:
+            res = {'id': index}
+
+            x = np.load(self.data.loc[index, 'npy_path'])
+            x = npy_tensor(x,)
+
+            curr_sample_rate = self.sample_rate
+            feats = torch.from_numpy(x)
+            res["source"] = self.postprocess(feats, curr_sample_rate)
+            if self.retain_original:
+                res["original"] = feats
+
+            if self.label:
+                labels = self.data.loc[index, self.y_labels].tolist()
+                res['label'] = torch.tensor(labels)        
+            return res
+        except Exception as e:
+            self.error_count += 1
+            print(f'Error #{self.error_count} occured at: {index}:  {e}')
+            #raise e
+            return self.__getitem__(index-1)
+
+
+    def __len__(self):
+        return self.len
+
+
+def npy_tensor(x, length=2500, mode="linear"):
+    """Utitily function to convert npy array to pytorch tensor. 
+        Apply cleaning and transform if specified
+    Here:
+     1. we apply scaler if needed;
+     2. we interpolate if needed;
+     3. we remove nan;
+     4. we reshape in (12, 2500), with type torch.float32
+
+     param: x numpy array of shape (L, 12, 1) or (L, 12)
+     return: torch tensor of shape (12, 2500)
+    """
+    x = x.squeeze().T
+    x = np.where(np.isnan(x), 0, x)
+    if x.shape[1] != length:
+        dtype = x.dtype
+        x = torch.from_numpy(x, dtype=torch.float32)    
+        x = F.interpolate(x.unsqueeze(0), length, mode=mode).squeeze(0)
+        x = x.numpy().astype(dtype)
+    
+    return x
+
+
+def npy_load(data, filename,  threshold = 5*1024*1024*1024):
+    """Utility to load small or large numpy array. 
+    @param data: If specified, return that. 
+    @param filename file location
+    @param threshold value above which the memmap is used
+    @return (use_memmap, data)"""
+    if data is not None:
+        return False, data
+    
+    fz = os.path.getsize(filename)
+    use_memmap = fz > threshold
+    return use_memmap, np.lib.format.open_memmap(filename, mode='r') if  use_memmap else np.load(filename)
+
+
+def get_norm_from_pkl(src_path):
+    with open(src_path, 'rb') as file:
+        scaler = pickle.load(file)
+    normalization = [
+        [m for m in scaler.mean_],
+        [s for s in scaler.scale_]
+    ]
+    return normalization

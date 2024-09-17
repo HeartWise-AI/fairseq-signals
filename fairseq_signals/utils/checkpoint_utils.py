@@ -154,7 +154,6 @@ def load_checkpoint(cfg: CheckpointConfig, trainer, **passthrough_args):
     optimizer_overrides = ast.literal_eval(cfg.optimizer_overrides)
     reset_meters = cfg.reset_meters
     reset_dataloader = cfg.reset_dataloader
-
     if cfg.finetune_from_model is not None and (
         reset_optimizer or reset_lr_scheduler or reset_meters or reset_dataloader
     ):
@@ -228,7 +227,6 @@ def load_checkpoint(cfg: CheckpointConfig, trainer, **passthrough_args):
         )
 
     trainer.lr_step(epoch_itr.epoch)
-
     return extra_state, epoch_itr
 
 def load_checkpoint_to_cpu(path, arg_overrides = None, load_on_all_ranks = False):

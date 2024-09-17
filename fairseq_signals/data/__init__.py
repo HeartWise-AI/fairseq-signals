@@ -5,7 +5,7 @@
 
 from .dataset import BaseDataset
 
-from .ecg.raw_ecg_dataset import FileECGDataset, PathECGDataset
+from .ecg.raw_ecg_dataset import FileECGDataset, PathECGDataset, NpECGDataset, DataframeECGDataset
 from .ecg.cmsc_ecg_dataset import CMSCECGDataset
 from .ecg.perturb_ecg_dataset import PerturbECGDataset, ThreeKGECGDataset
 from .ecg.identification_ecg_dataset import IdentificationECGDataset
@@ -25,6 +25,8 @@ __all__ = [
     "ShardedIterator",
     "FileECGDataset",
     "PathECGDataset",
+    "NpECGDataset",
+    "DataframeECGDataset",
     "CMSCECGDataset",
     "PerturbECGDataset",
     "ThreeKGECGDataset",

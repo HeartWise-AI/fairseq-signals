@@ -28,6 +28,11 @@ def get_parser():
         help="file containing the .csv or .parquet to pre-process"
     )
     parser.add_argument(
+        "--npy-path", type=str, 
+        default=None,
+        help="file containing the .npy of all ecgs. Usefull the .csv does not have single ecgs paths"
+    )
+    parser.add_argument(
         "--dest", type=str, metavar="DIR",
         help="output directory"
     )
@@ -110,6 +115,12 @@ def get_parser():
         type=str,
         help="pickle normalization file"
     )
+    parser.add_argument(
+        "--scale",
+        default=1.,
+        type=float,
+        help="scale factor. can be done with normalization (mean, std) = (0, 1/scale), but this is straightforward"
+    )
     parser.add_argument("--workers", metavar="N", default=1, type=int,
                        help="number of parallel workers")
     parser.add_argument("--seed", default=42, type=int, metavar="N", help="random seed")
@@ -120,6 +131,7 @@ def main(args):
     dir_path = os.path.realpath(args.root)
     dest_path = os.path.realpath(args.dest)
     x_path = os.path.realpath(args.x_path)
+    args.npy_path = None if args.npy_path is None else os.path.realpath(args.npy_path)
 
     scaler = None
     if args.normalization:
@@ -149,6 +161,8 @@ def main(args):
             csv.rename(columns={'RV1 + SV6\xa0> 11 mm': 'RV1 + SV6 > 11 mm'}, inplace=True)
         y_labels = ['Acute pericarditis', 'QS complex in V1-V2-V3', 'T wave inversion (anterior - V3-V4)', 'Right atrial enlargement','2nd degree AV block - mobitz 1','Left posterior fascicular block','Wolff-Parkinson-White (Pre-excitation syndrome)','Junctional rhythm','Premature ventricular complex',"rSR' in V1-V2",'Right superior axis','ST elevation (inferior - II, III, aVF)','Afib','ST elevation (anterior - V3-V4)','RV1 + SV6 > 11 mm','Sinusal','Monomorph','Delta wave','R/S ratio in V1-V2 >1','Third Degree AV Block','LV pacing','Nonspecific intraventricular conduction delay','ST depression (inferior - II, III, aVF)','Regular','Premature atrial complex','2nd degree AV block - mobitz 2','Left anterior fascicular block','Q wave (septal- V1-V2)','Prolonged QT','Left axis deviation','Left ventricular hypertrophy','ST depression (septal- V1-V2)','Supraventricular tachycardia','Atrial paced','Q wave (inferior - II, III, aVF)','no_qrs','T wave inversion (lateral -I, aVL, V5-V6)','Right bundle branch block','ST elevation (septal - V1-V2)','SV1 + RV5 or RV6 > 35 mm','Right axis deviation','RaVL > 11 mm','Polymorph','Ventricular tachycardia','QRS complex negative in III','ST depression (lateral - I, avL, V5-V6)','1st degree AV block','Lead misplacement','Q wave (posterior - V7-V9)','Atrial flutter','Ventricular paced','ST elevation (posterior - V7-V8-V9)','Ectopic atrial rhythm (< 100 BPM)','Early repolarization','Ventricular Rhythm','Irregularly irregular','Atrial tachycardia (>= 100 BPM)','R complex in V5-V6','ST elevation (lateral - I, aVL, V5-V6)','Brugada','Bi-atrial enlargement','Q wave (lateral- I, aVL, V5-V6)','ST upslopping','T wave inversion (inferior - II, III, aVF)','Regularly irregular','Bradycardia','qRS in V5-V6-I, aVL','Q wave (anterior - V3-V4)','Acute MI','ST depression (anterior - V3-V4)','Right ventricular hypertrophy','T wave inversion (septal- V1-V2)','ST downslopping','Left bundle branch block','Low voltage','U wave','Left atrial enlargement']
         labels = csv[y_labels].to_numpy()
+    else:
+        labels = np.full((len(csv),), None, dtype=object)
 
     table = dict()
     labels_dict = dict()
@@ -181,39 +195,52 @@ def main(args):
         
 
 def preprocess(args, scaler, leads_to_load, dest_path, pid_fnames):
+    def load_npy(fname, npy_path):
+        if npy_path is None:
+            return np.load(fname).squeeze()
+        else:
+            #expected format of fname: pid_rowid_rest
+            rowid = int(fname.split('_')[1])
+            X = np.lib.format.open_memmap(npy_path, mode='r')
+            return X[rowid]
+
     pid, (fnames, labels) = pid_fnames
     fnames = fnames.split(',')
+        
     for label, fname in zip(labels, fnames):
         basename = os.path.basename(fname)
         dest_folder = get_folder(dest_path, basename, args.bin_size, args.folder_name_length)
         try: 
-            record = np.load(fname).squeeze()
+            record = load_npy(fname, args.npy_path) #np.load(fname).squeeze()
         except Exception as e:
             print(f"unable to load {fname}, so skipped")
             continue
         
         if scaler is not None:
             record = scaler.transform(record)
-        record = record.T
-            
+        record = args.scale * record.T
         if np.isnan(record).any():
             print(f"detected nan value at: {fname}, so skipped")
             continue
             
         length = record.shape[-1]
         #pid = int(pid) if pid.isdigit() else pid
-        for i, seg in enumerate(range(0, length, int(args.sec * args.sample_rate))):
+        def savemat(pid, feats, label, matname):
             data = {}
             data['patient_id'] = pid
             data['idx'] = pid
-            data['label'] = label
+            if label is not None:
+                data['label'] = label
             data['curr_sample_rate'] = args.sample_rate
+            data['feats'] = feats
+            scipy.io.savemat(os.path.join(dest_folder, matname), data)
+            
+        for i, seg in enumerate(range(0, length, int(args.sec * args.sample_rate))):
             if seg + args.sec * args.sample_rate <= length:
-                data['feats'] = record[leads_to_load, seg: int(seg + args.sec * args.sample_rate)]
-                #if '0023209_01-27-2016_09-11-03.npy' in basename:
-                #    print(os.path.join(dest_folder, f"{basename}_{i}.mat"))
-                scipy.io.savemat(os.path.join(dest_folder, f"{basename}_{i}.mat"), data)
-
+                feats = record[leads_to_load, seg: int(seg + args.sec * args.sample_rate)]
+                savemat(pid, feats, label, f"{basename}_{i}.mat")
+        if label is not None:
+            savemat(pid, record[leads_to_load], label, f"{basename}.mat")
 
 
 def get_folder(root_destination_folder, basename, bin_size, folder_name_length):
