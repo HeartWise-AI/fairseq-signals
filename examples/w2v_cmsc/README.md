@@ -67,6 +67,12 @@ path/to/manifest/identify
 ```
 Note: `valid_*.tsv` should have been from **PTB-XL** dataset while `train.tsv` should have been from **PhysioNet2021** dataset.
 
+
+# Inference
+```shell script
+CUDA_VISIBLE_DEVICES=2 fairseq-hydra-inference task.data=/volume/deepecg/ecgs-data/fairseq/mhi/manifest/finetune/ common_eval.path=/volume/deepecg/fairseq-signals/outputs/2024-08-29/18-16-39/checkpoints/checkpoint_best.pt common_eval.results_path=/volume/deepecg/ecgs-data/fairseq/mhi/results/finetune/ --config-dir examples/w2v_cmsc/config/finetuning/ecg_transformer/ --config-name diagnosis
+```
+
 # Citation
 Please cite as:
 ```
