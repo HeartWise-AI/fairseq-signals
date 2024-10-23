@@ -283,7 +283,6 @@ def load_checkpoint_to_cpu(path, arg_overrides = None, load_on_all_ranks = False
 
         _utils.is_primitive_type = old_primitive
         OmegaConf.set_struct(state["cfg"], True)
-
         if arg_overrides is not None:
             overwrite_args_by_name(state["cfg"], arg_overrides)
     
@@ -312,6 +311,7 @@ def load_model_and_task(
     suffix="",
     num_shards=1,
     state=None,
+    from_checkpoint=True
 ):
     from fairseq_signals import tasks
 
@@ -342,7 +342,7 @@ def load_model_and_task(
             )
     
     if task is None:
-        task = tasks.setup_task(cfg.task, from_checkpoint=True)
+        task = tasks.setup_task(cfg.task, from_checkpoint=from_checkpoint)
     
     if "task_state" in state:
         task.load_state_dict(state["task_state"])
@@ -396,7 +396,6 @@ def load_model_and_task(
 
     elapsed = time.time() - st
     logger.info(f"Loaded a checkpoint in {elapsed:.2f}s")
-    
     return model, cfg, task
 
 def checkpoint_paths(path, pattern = r"checkpoint(\d+)\.pt", keep_match = False):

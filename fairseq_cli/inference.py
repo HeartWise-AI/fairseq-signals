@@ -49,9 +49,14 @@ def main(cfg: DictConfig, override_args=None):
     else:
         overrides = {}
 
-    overrides.update({"task": {"data": cfg.task.data}})
+    overrides.update({"task": {"data": cfg.task.data, "npy_dataset": cfg.task.npy_dataset}, "df_dataset": cfg.task.df_dataset})
+    
+    #overrides.update({"task": cfg.task})
     model_overrides = eval(getattr(cfg.common_eval, "model_overrides", "{}"))
     overrides.update(model_overrides)
+
+
+    print('-'*10, overrides, override_args, cfg.task)
 
     # Load model
     logger.info(f"loading model from {cfg.common_eval.path}")
@@ -60,8 +65,6 @@ def main(cfg: DictConfig, override_args=None):
         arg_overrides=overrides,
         suffix=cfg.checkpoint.checkpoint_suffix
     )
-
-    torch.save(model, '/media/data1/achilsowa/models/model.pt')
 
     logger.info(
         "num. shared model params: {:,} (num. trained: {:,})".format(

@@ -289,6 +289,7 @@ class TransformerFinetuningModel(FinetuningModel):
         
         self.final_dropout = nn.Dropout(cfg.final_dropout)
         self.freeze_finetune_updates = cfg.freeze_finetune_updates
+        self.linear_evaluation = cfg.linear_evaluation
         self.num_updates = 0
 
     @classmethod

@@ -6,8 +6,8 @@ common:
 
 checkpoint:
   save_dir: checkpoints-all
-  save_interval: 1
-  keep_last_epochs: 5
+  save_interval: 25
+  keep_last_epochs: 10
   save_interval_updates: 0
   no_epoch_checkpoints: false
 
@@ -41,7 +41,7 @@ criterion:
   loss_weights: [0.1, 10]
 
 optimization:
-  max_epoch: 200
+  max_epoch: 1000 #200
   lr: [5e-5]
   update_freq: [2]
 

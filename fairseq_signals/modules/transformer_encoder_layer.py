@@ -7,6 +7,11 @@ from fairseq_signals.modules import (
     LayerNorm
 )
 
+#@achil
+#We moved gelu fct at the module level so we can pickle it
+def gelu(x: torch.Tensor) -> torch.Tensor:
+    return F.gelu(x.float()).type_as(x)
+
 class TransformerEncoderLayer(nn.Module):
     def __init__(
         self,
@@ -23,6 +28,7 @@ class TransformerEncoderLayer(nn.Module):
         self.dropout = dropout
         self.activation_dropout = activation_dropout
 
+        #@achil
         def gelu(x: torch.Tensor) -> torch.Tensor:
             return F.gelu(x.float()).type_as(x)
         self.activation_fn = gelu

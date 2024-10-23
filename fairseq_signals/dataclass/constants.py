@@ -27,10 +27,10 @@ class StrEnum(Enum, metaclass=StrEnumMeta):
     def __hash__(self):
         return hash(str(self))
 
-
 def ChoiceEnum(choices: List[str]):
     """return the Enum class used to enforce list of choices"""
     return StrEnum("Choices", {k: k for k in choices})
 
 LOG_FORMAT_CHOICES = ChoiceEnum(["json", "none", "simple", "tqdm", "csv"])
 DDP_COMM_HOOK_CHOICES = ChoiceEnum(["none", "fp16"])
+

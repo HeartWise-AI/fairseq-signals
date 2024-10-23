@@ -17,7 +17,7 @@ from fairseq_signals.tasks import Task
 from fairseq_signals.logging.meters import safe_round
 
 @dataclass
-class AsymmetricCriterionConfig(Dataclass):
+class MultiLabelSoftMarginLossConfig(Dataclass):
     weight: Optional[List[float]] = field(
         default = None,
         metadata = {
@@ -37,30 +37,6 @@ class AsymmetricCriterionConfig(Dataclass):
             "help": "additionally log metrics for each of these keys, only applied for acc, auc, f1score"
         }
     )
-    gamma_neg: float = field(
-        default=4,
-        metadata={"help": ""}
-    )
-    gamma_pos: float = field(
-        default=0,
-        metadata={"help": ""}
-    )
-    clip: float = field(
-        default=0.05,
-        metadata={"help": ""}
-    )
-    eps: float = field(
-        default=1e-8,
-        metadata={"help": ""}
-    )
-    disable_torch_grad_focal_loss: bool = field(
-        default=False,
-        metadata={"help": ""}
-    )
-    threshold: float = field(
-        default=0.5,
-        metadata={"help": "threshold value for measuring accuracy"}
-    )
     report_auc: bool = field(
         default=False,
         metadata={"help": "whether to report auprc / auroc metric, used for valid step"}
@@ -71,25 +47,14 @@ class AsymmetricCriterionConfig(Dataclass):
     )
 
 @register_criterion(
-    "asymmetric", dataclass = AsymmetricCriterionConfig
+    "mlsml", dataclass = MultiLabelSoftMarginLossConfig
 )
-class AsymmetricCriterion(BaseCriterion):
-    def __init__(self, cfg: AsymmetricCriterionConfig, task: Task):
+class MultiLabelSoftMarginLossCriterion(BaseCriterion):
+    def __init__(self, cfg: MultiLabelSoftMarginLossConfig, task: Task):
         super().__init__(task)
-        self.threshold = cfg.threshold
         self.weight = cfg.weight
         self.report_auc = cfg.report_auc
-        self.gamma_neg = cfg.gamma_neg
-        self.gamma_pos = cfg.gamma_pos
-        self.clip = cfg.clip
-        self.disable_torch_grad_focal_loss = cfg.disable_torch_grad_focal_loss
-        self.eps = cfg.eps
 
-
-        # prevent memory allocation and gpu uploading every iteration, and encourages inplace operations
-        self.targets = self.anti_targets = self.xs_pos = self.xs_neg = self.asymmetric_w = (
-            self.loss
-        ) = None
 
     def forward(self, model, sample, reduce = True, save_outputs=False):
         """Compute the loss for the given sample.
@@ -101,44 +66,13 @@ class AsymmetricCriterion(BaseCriterion):
         """
         net_output = model(**sample["net_input"])
         logits = model.get_logits(net_output).float()
-        probs = torch.sigmoid(logits)
         target = model.get_targets(sample, net_output)
         if save_outputs:
             self.store(logits, target)
 
-        self.targets = target
-        self.anti_targets = 1 - target
-
-        # Calculating Probabilities
-        self.xs_pos = probs
-        self.xs_neg = 1.0 - self.xs_pos
-
-        # Asymmetric Clipping
-        if self.clip is not None and self.clip > 0:
-            self.xs_neg.add_(self.clip).clamp_(max=1)
-
-        # Basic CE calculation
-        self.loss = self.targets * torch.log(self.xs_pos.clamp(min=self.eps))
-        self.loss.add_(self.anti_targets * torch.log(self.xs_neg.clamp(min=self.eps)))
-
-        # Asymmetric Focusing
-        if self.gamma_neg > 0 or self.gamma_pos > 0:
-            if self.disable_torch_grad_focal_loss:
-                torch.set_grad_enabled(False)
-            self.xs_pos = self.xs_pos * self.targets
-            self.xs_neg = self.xs_neg * self.anti_targets
-            self.asymmetric_w = torch.pow(
-                1 - self.xs_pos - self.xs_neg,
-                self.gamma_pos * self.targets + self.gamma_neg * self.anti_targets,
-            )
-            if self.disable_torch_grad_focal_loss:
-                torch.set_grad_enabled(True)
-            self.loss *= self.asymmetric_w
-
         reduction = "none" if not reduce else "sum"
-
-        loss = -self.loss.sum() if reduce else -self.loss
-
+        loss = F.multilabel_soft_margin_loss(logits, target, reduction=reduction)
+        
         if 'sample_size' in sample:
             sample_size = sample['sample_size']
         elif 'mask_indices' in sample['net_input']:
@@ -151,7 +85,7 @@ class AsymmetricCriterion(BaseCriterion):
             "nsignals": sample["id"].numel(),
             "sample_size": sample_size
         }
-
+        
         with torch.no_grad():
             probs = torch.sigmoid(logits)
             outputs = (probs > 0.5)
@@ -185,7 +119,7 @@ class AsymmetricCriterion(BaseCriterion):
             if not self.training and self.report_auc:
                 logging_output["_y_true"] = target.cpu().numpy()
                 logging_output["_y_score"] = probs.cpu().numpy()
-        
+
         return loss, sample_size, logging_output
 
     @staticmethod
@@ -224,7 +158,6 @@ class AsymmetricCriterion(BaseCriterion):
                     )
                 )
 
-        
         metrics.log_scalar("nsignals", nsignals)
 
         correct = sum(log.get("correct", 0) for log in logging_outputs)

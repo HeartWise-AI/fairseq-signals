@@ -15,6 +15,7 @@ from .transformer_encoder import TransformerEncoder
 from .transpose_last import TransposeLast
 from .conv_feature_extraction import ConvFeatureExtraction, TransposedConvFeatureExtraction
 from .conv_positional_encoding import ConvPositionalEncoding
+from .attentive_pooler import AttentiveClassifier
 
 __all__ = [
     "ConvFeatureExtraction",
@@ -30,5 +31,6 @@ __all__ = [
     "TransformerEncoderLayer",
     "TransformerEncoder",
     "TransposeLast",
-    "TransposedConvFeatureExtraction"
+    "TransposedConvFeatureExtraction",
+    "AttentiveClassifier"
 ]

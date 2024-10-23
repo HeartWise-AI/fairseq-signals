@@ -28,7 +28,7 @@ def get_parser():
         type=str,
         help="comma seperated list of data subsets to manifest for pre-training (e.g. cpsc_2018, cpsc_2018_extra, ...), "
              "each of which should be corresponded with the name of the sub-directory"
-             "Added: possible value is folder_name_len:skip:total. e.g 10:1000:1000"
+             "Added: possible value is folder_name_len:skip:total. e.g 10:1000:100000"
     )
     parser.add_argument(
         "--finetune_subset",

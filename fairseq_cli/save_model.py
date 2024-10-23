@@ -8,6 +8,8 @@ from omegaconf import DictConfig
 
 import numpy as np
 import torch
+import dill
+import io
 
 from fairseq_signals import distributed_utils
 from fairseq_signals.utils import checkpoint_utils, options, utils
@@ -27,7 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger("fairseq_cli.save_model")
 
 def main(cfg: DictConfig, override_args=None):
-    torch.multiprocessing.set_sharing_strategy("file_system")
+    #torch.multiprocessing.set_sharing_strategy("file_system")
 
     utils.import_user_module(cfg.common)
 
@@ -55,13 +57,48 @@ def main(cfg: DictConfig, override_args=None):
 
     # Load model
     logger.info(f"loading model from {cfg.common_eval.path}")
+
+    logger.info('*'*10, f'override: {overrides}', '--------------', cfg.checkpoint.checkpoint_suffix)
     model, saved_cfg, task = checkpoint_utils.load_model_and_task(
         cfg.common_eval.path,
         arg_overrides=overrides,
         suffix=cfg.checkpoint.checkpoint_suffix
     )
     save_path = os.path.join(os.path.dirname(cfg.common_eval.path), 'model.pt')
-    torch.save(model, save_path)
+
+    logger.info(
+        "num. shared model params: {:,} (num. trained: {:,})".format(
+            sum(p.numel() for p in model.parameters() if not getattr(p, "expert", False)),
+            sum(p.numel() for p in model.parameters() if not getattr(p, "expert", False) and p.requires_grad)
+        )
+    )
+
+    logger.info(
+        "num. expert model params: {} (num. trained: {})".format(
+            sum(p.numel() for p in model.parameters() if getattr(p, "expert", False)),
+            sum(p.numel() for p in model.parameters() if getattr(p, "expert", False) and p.requires_grad)
+        )
+    )
+
+    # Move model to GPU
+    model.eval()
+    if use_fp16:
+        model.half()
+    if use_cuda:
+        model.cuda()
+
+    with open(save_path, 'wb') as file:
+        torch.save(model, file, pickle_module=dill)
+        #dill.dump(model, file)
+
+    dummy_input = torch.randn(1, 12, 2500).to("cuda")
+    traced_model = torch.jit.trace(model, dummy_input)
+    traced_model.save(save_path)
+    model = torch.jit.load(save_path)
+    #with open(save_path, 'rb') as file:
+        #rmodel = dill.load(file)
+    #model = torch.load(save_path, pickle_module=dill)
+
     logger.info(f"saving model to {save_path}")
     
     

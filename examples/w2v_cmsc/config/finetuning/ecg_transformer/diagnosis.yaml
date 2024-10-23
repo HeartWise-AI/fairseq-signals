@@ -1,6 +1,6 @@
 
 common:
-  fp16: true #false
+  #fp16: true #false
   log_format: json
   log_interval: 10
   all_gather_list_size: 2048000
@@ -21,7 +21,7 @@ task:
   _name: ecg_classification
   data: ???
   #npy_dataset: true
-  df_dataset: true
+  #df_dataset: true
   normalize: false
   enable_padding: true
   enable_padding_leads: false
@@ -45,7 +45,7 @@ criterion:
 
 optimization:
   max_epoch: 100
-  max_update: 320000
+  max_update: 32000000 #320000
   lr: [0.00005]
 
 optimizer:
@@ -70,4 +70,5 @@ model:
 
   feature_grad_mult: 0.0
   freeze_finetune_updates: 0
+  linear_evaluation: 
   in_d: 12

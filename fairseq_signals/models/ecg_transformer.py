@@ -295,6 +295,7 @@ class ECGTransformerFinetuningModel(TransformerFinetuningModel):
         }
 
         ft = self.freeze_finetune_updates <= self.num_updates
+        ft = ft and not self.linear_evaluation
 
         with torch.no_grad() if not ft else contextlib.ExitStack():
             res = self.encoder.extract_features(**args)

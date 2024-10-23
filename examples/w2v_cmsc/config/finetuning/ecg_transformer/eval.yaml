@@ -20,8 +20,8 @@ checkpoint:
 task:
   _name: ecg_classification
   data: ???
-  #npy_dataset: true
-  df_dataset: true
+  npy_dataset: false
+  df_dataset: false
   normalize: false
   enable_padding: true
   enable_padding_leads: false
@@ -69,5 +69,5 @@ model:
   # encoder_layerdrop: 0.1
 
   feature_grad_mult: 0.0
-  freeze_finetune_updates: 
+  freeze_finetune_updates: 0
   in_d: 12

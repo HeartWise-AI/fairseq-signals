@@ -39,7 +39,7 @@ def setup_task(cfg: Dataclass, **kwargs):
             task = TASK_REGISTRY[task_name]
     
     assert task is not None, f"Could not infer task type from {cfg}. Available tasks: {TASK_REGISTRY.keys()}"
-
+    print('??'*10, cfg)
     return task.setup_task(cfg, **kwargs)
 
 def register_task(name, dataclass = None):

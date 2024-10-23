@@ -11,6 +11,7 @@ from fairseq_signals.models.ecg_transformer import (
     ECGTransformerFinetuningModel,
     ECGTransformerFinetuningConfig
 )
+from fairseq_signals.modules import AttentiveClassifier
 
 from fairseq_signals.utils import utils
 
@@ -20,16 +21,21 @@ class ECGTransformerClassificationConfig(ECGTransformerFinetuningConfig):
         default=MISSING, metadata={"help": "number of labels to be classified"}
     )
 
-@register_model("ecg_transformer_classifier", dataclass=ECGTransformerClassificationConfig)
+@register_model("ecg_transformer_attn_classifier", dataclass=ECGTransformerClassificationConfig)
 class ECGTransformerClassificationModel(ECGTransformerFinetuningModel):
     def __init__(self, cfg, encoder):
         super().__init__(cfg, encoder)
 
-        self.proj = nn.Linear(cfg.encoder_embed_dim, cfg.num_labels)
-        nn.init.xavier_uniform_(self.proj.weight)
-        nn.init.constant_(self.proj.bias, 0.0)
+        
+        #self.proj = nn.Linear(cfg.encoder_embed_dim, cfg.num_labels)
+        #nn.init.xavier_uniform_(self.proj.weight)
+        #nn.init.constant_(self.proj.bias, 0.0)
 
-        print('#'*10, cfg)
+        self.proj = AttentiveClassifier(
+            embed_dim=cfg.encoder_embed_dim,
+            num_classes=cfg.num_labels
+        )
+
 
     def get_logits(self, net_output, normalize=False):
         logits = net_output["out"]
@@ -52,7 +58,7 @@ class ECGTransformerClassificationModel(ECGTransformerFinetuningModel):
         if padding_mask is not None and padding_mask.any():
             x[padding_mask] = 0
 
-        x = torch.div(x.sum(dim=1), (x != 0).sum(dim=1))
+       #x = torch.div(x.sum(dim=1), (x != 0).sum(dim=1))
 
         x = self.proj(x)
 

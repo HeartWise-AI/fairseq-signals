@@ -20,12 +20,14 @@ class FinetuningConfig(Dataclass):
     freeze_finetune_updates: int = field(
         default=0, metadata={"help": "dont finetune pretrained model for this many updates"}
     )
+    linear_evaluation: Optional[bool] = field(
+        default=False, metadata={"help": "if true, do not update encoder weight while training. Similar to freeze_finetune_updates sufficiently large"}
+    )
 
 class FinetuningModel(BaseModel):
     def __init__(self, cfg: FinetuningConfig, encoder: BaseModel):
         super().__init__()
         self.cfg = cfg
-        print('#'*10, cfg)
         self.encoder = encoder
 
     def set_num_updates(self, num_updates):

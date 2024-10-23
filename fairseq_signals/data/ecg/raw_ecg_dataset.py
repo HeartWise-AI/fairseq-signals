@@ -583,11 +583,13 @@ class NpECGDataset(RawECGDataset):
 
         with open(manifest_path, "r") as f:
             for i, line in enumerate(f):
-                items = line.strip().split("\t")
+                items = line.strip().split(":")
                 assert len(items) == 2, line
                 key, value = items
                 if key == "x_path":
                     self.ecg_file = value
+                if key == "x_shape":
+                    self.ecg_shape = eval(value)
                 elif key == "y_path":
                     self.label_file = value
                 elif key == "label_indexes":
@@ -596,7 +598,12 @@ class NpECGDataset(RawECGDataset):
                     self.normalize = True
                     mean, std = get_norm_from_pkl(value)
                     self.mean = np.array(mean)[:, None]
-                    self.std = np.array(std)[:, None]        
+                    self.std = np.array(std)[:, None]   
+                elif key == "scale":
+                    self.normalize = True
+                    self.mean = np.zeros((self.ecg_shape[1], 1))
+                    self.std = (1/eval(value)) * np.ones((self.ecg_shape[1], 1))
+             
         
         use_memmap, data = npy_load(data=None, filename=self.ecg_file)    
         self.xdata = None if use_memmap else data
@@ -668,7 +675,11 @@ class DataframeECGDataset(RawECGDataset):
                     self.normalize = True
                     mean, std = get_norm_from_pkl(value)
                     self.mean = np.array(mean)[:, None]
-                    self.std = np.array(std)[:, None]        
+                    self.std = np.array(std)[:, None]   
+                elif key == "scale":
+                    self.normalize = True
+                    self.mean = np.zeros((self.ecg_shape[1], 1))
+                    self.std = (1/eval(value)) * np.ones((self.ecg_shape[1], 1))
         
         ext = self.ecg_file.split(".")[-1]
         if ext == "parquet":
@@ -679,6 +690,8 @@ class DataframeECGDataset(RawECGDataset):
             self.len = len(self.data)
         self.sizes = [self.ecg_shape[1]] * self.len 
 
+
+        print('#'*10, self.y_labels, self.data, self.len, self.ecg_file)
         if 'RV1 + SV6\xa0> 11 mm' in self.data.columns.tolist():
             self.data.rename(columns={'RV1 + SV6\xa0> 11 mm': 'RV1 + SV6 > 11 mm'}, inplace=True)
         self.data.reset_index(inplace=True, drop=True)
