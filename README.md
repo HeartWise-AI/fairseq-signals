@@ -1,21 +1,6 @@
 # Fairseq-signals
 
-Fairseq-signals is a collection of deep learning models for ECG data processing based on the [`fairseq`](https://github.com/pytorch/fairseq).
-
-We provide implementations of various deep learning methods on ECG data, including official implementations of our works.
-
-### List of implemented papers:
-* [Multi-Modal Masked Autoencoders for Medical Vision-and-Language Pre-Training](https://arxiv.org/abs/2209.07098)
-* [Multi-modal Understanding and Generation for Medical Images and Text via Vision-Language Pre-Training](https://arxiv.org/abs/2105.11333)
-* [Lead-agnostic Self-supervised Learning for Local and Global Representations of Electrocardiogram](https://arxiv.org/abs/2203.06889)*
-* [3KG: Contrastive Learning of 12-Lead Electrocardiograms using Physiologically-Inspired Augmentations](https://arxiv.org/abs/2106.04452)
-* [CLOCS: Contrastive Learning of Cardiac Signals Across Space, Time, and Patients](https://arxiv.org/abs/2005.13249)
-* [wav2vec 2.0: A Framework for Self-supervised Learning of Speech Representations](https://arxiv.org/abs/2006.11477)
-* [A Simple Framework for Contrastive Learning of Visual Representations](https://arxiv.org/abs/2002.05709)
-
-\* denotes for an official implementation
-
-We will keep implementing new methods in this repo. If you have any recommendations, please contact us via an issue or an e-mail.
+This is an adaption of the [`Fairseq-signals`](https://github.com/Jwoo5/fairseq-signals) for Heartwise.
 
 # Requirements and Installation
 * [PyTorch](https://pytorch.org) version >= 1.5.0
@@ -24,9 +9,11 @@ We will keep implementing new methods in this repo. If you have any recommendati
 * **To install fairseq-signals** from source and develop locally:
 
 ```bash
-git clone https://github.com/Jwoo5/fairseq-signals
+git clone https://github.com/HeartWise-AI/fairseq-signals
 cd fairseq-signals
 pip install --editable ./
+pip install omegaconf==2
+pip install hydra-core==1
 ```
 
 * **To preprocess ECG datasets**: `pip install pandas scipy wfdb`
@@ -34,9 +21,12 @@ pip install --editable ./
 * **For large datasets** install [PyArrow](https://arrow.apache.org/docs/python/install.html#using-pip): `pip install pyarrow`
 
 # Getting Started
-## For uni-modal tasks (ECG Classification, ...)
-### Prepare ECG dataset
-We provide pre-processing codes for various ECG datasets.
+Once you've deployed fairseq-signals, you can either load DeepECG-SSL fondation model and use it in your personal training pipeline or rely on fairseq-cli to finetune DeepECG-SSL and to do inference on finetuned models
+## Choice 1: Load DeepECG-SSL and you it in your pipeline
+We provide a notebook with example usage
+## Choice 2: Use fairseq-cli
+This methods is easier as it reuse all the command line interface elements of fairseq-signals.
+On top of that we added helper method to allow you to generate the commmand line, with some examples in
 
 * [PhysioNet2021](https://physionet.org/content/challenge-2021/1.0.3/#files)
 * [PTB-XL](https://physionet.org/content/ptb-xl/1.0.3/)
