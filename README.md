@@ -2,6 +2,8 @@
 
 This is an adaption of the [`Fairseq-signals`](https://github.com/Jwoo5/fairseq-signals) for Heartwise.
 
+It is highly recommended to create a dedicated conda environment before installing the following libraries
+
 # Requirements and Installation
 * [PyTorch](https://pytorch.org) version >= 1.5.0
 * Python version >= 3.6, and <= 3.9
@@ -11,128 +13,114 @@ This is an adaption of the [`Fairseq-signals`](https://github.com/Jwoo5/fairseq-
 ```bash
 git clone https://github.com/HeartWise-AI/fairseq-signals
 cd fairseq-signals
+pip install pip==24.0
 pip install --editable ./
-pip install omegaconf==2
-pip install hydra-core==1
+pip install omegaconf==2.0.5 hydra-core==1.0.4
 ```
 
 * **To preprocess ECG datasets**: `pip install pandas scipy wfdb`
 * **To build cython components**: `python setup.py build_ext --inplace`
 * **For large datasets** install [PyArrow](https://arrow.apache.org/docs/python/install.html#using-pip): `pip install pyarrow`
 
+It is highly recommended to create a dedicated conda environment before installing the following libraries
+
 # Getting Started
-Once you've deployed fairseq-signals, you can either load DeepECG-SSL fondation model and use it in your personal training pipeline or rely on fairseq-cli to finetune DeepECG-SSL and to do inference on finetuned models
-## Choice 1: Load DeepECG-SSL and you it in your pipeline
-We provide a notebook with example usage
-## Choice 2: Use fairseq-cli
-This methods is easier as it reuse all the command line interface elements of fairseq-signals.
-On top of that we added helper method to allow you to generate the commmand line, with some examples in
+For general commands on ecg preprocessing, model pretraining and other fairseq-signals specific, please check [`Fairseq-signals`](https://github.com/Jwoo5/fairseq-signals).
+Here we will focus on explaining how to train your own classification models end-to-end or initializing weights from DeepECG-SSL (both linear probing and finetuning),
+how to do inference of the models within fairseq-signals and how to save models in onnx formats so they can be used anywhere else for inference. 
 
-## Choice 3
-
-* [PhysioNet2021](https://physionet.org/content/challenge-2021/1.0.3/#files)
-* [PTB-XL](https://physionet.org/content/ptb-xl/1.0.3/)
-
-### Pre-process
-Given a directory that contains WFDB directories to be pre-processed for **PhysioNet2021**:
-
+## 1: Install fairseq-signals
+Here we assumed you cloned the project and install the different modules as described in the Requirements and Installation section
+## 2: Finetune DeepECG-SSL
+This will update all the weights (base model + classification head)
 ```shell script
-$ python fairseq_signals/data/ecg/preprocess/preprocess_physionet2021.py \
-    /path/to/physionet2021/ \
-    --dest /path/to/output \
-    --workers $N
+$ CUDA_VISIBLE_DEVICES=[device_num] fairseq-hydra-train common.fp16=[use_fp16] task.data=[manifest_folder] \
+    model.model_path=[deepecg-ssl-path] +task.npy_dataset=true model.num_labels=[num_labels] \
+    criterion._name=[loss_name] checkpoint.save_dir=[checkpoint_dir] \
+    --config-dir examples/w2v_cmsc/config/finetuning/ecg_transformer --config-name diagnosis
+```
+- `[device_num]` should be an integer representing the cuda gpu number (starting at 0)
+- `[use_fp16]` should be either `true` for `false`. When finetuning `DeepECG-SSL`, use `true`
+- `[manifest_folder]` is a folder containing at least two manifest files `train.tsv` and `valid.tsv`, in the section `Manifest structure` we will give example of this file
+- `[deepecg-ssl-path]` is the .pt corresponding to `DeepECG-SSL` base model. The `valid` set is used to earlystop the finetuning.
+- `[+task.npy_dataset=true]`: in case your training/validation data are save in a panda array, replace this with `[+task.df_dataset=true]`
+- `[num_labels]` is an integer corresponding to the number of target class in the classification. For binary classification, `[num_labels] = 1`
+- `[loss_name]` correspond to the loss function. Possible values are `as` (asymetric loss), `bf` (binary focal loss), `mse` (mean square error loss), `bce` (binary cross entropy with logits loss), and `mlsml` (multilabel soft marginal loss)
+- `[checkpoint_dir]` is the checkpoint directory subfolder name inside the folder `outputs/`. fairseq-signals automatically classify folder using the date and time when they are created
+
+## 3: Linear evaluation with DeepECG-SSL
+This will freez the base model weights and only update classification weights
+```shell script
+$ CUDA_VISIBLE_DEVICES=[device_num] fairseq-hydra-train common.fp16=[use_fp16] task.data=[manifest_folder] \
+    model.model_path=[deepecg-ssl-path] model.linear_evaluation=true +task.npy_dataset=[npy_dataset] \
+    model.num_labels=[num_labels] criterion._name=[loss_name] checkpoint.save_dir=[checkpoint_dir] \
+    --config-dir examples/w2v_cmsc/config/finetuning/ecg_transformer --config-name diagnosis
+```
+All parameters are the same as for finetuning, expect `model.linear_evaluation` whose value is `true`
+
+## 4: End to end model
+In case you want to initialized all the weights (base transformer + classification head) randomnly, in other to perform end-to-end training, you the following
+```shell script
+$ CUDA_VISIBLE_DEVICES=[device_num] fairseq-hydra-train common.fp16=[use_fp16] task.data=[manifest_folder] \
+    model.no_pretrained_weights=true +task.npy_dataset=[npy_dataset] model.num_labels=[num_labels] \
+    criterion._name=[loss_name] checkpoint.save_dir=[checkpoint_dir] \
+    --config-dir examples/w2v_cmsc/config/finetuning/ecg_transformer --config-name diagnosis
+```
+All parameters are the same as for finetuning, expect `model.no_pretrained_weights=true` and `[deepecg-ssl-path]`, the base model path, which is not set, as it is not needed.
+
+## 5: Inference of trained models
+Once you trained your model, either by finetuiing, linear evalution or end-to-end, the final checkpoint is saved in the corresponding directory (specified with `[checkpoint_dir]`
+Now you can run the inference on a given `.tsv` file that specifies your test data.
+```shell script
+$ CUDA_VISIBLE_DEVICES=[device_num] fairseq-hydra-inference task.data=[manifest_folder] \
+    common_eval.path=[model_to_evaluate] common_eval.results_path=[results_path] \
+    task.npy_dataset=true model.num_labels=[num_labels] dataset.valid_subset=[test_file] \
+    --config-dir examples/w2v_cmsc/config/finetuning/ecg_transformer --config-name eval
+```
+- `[model_to_evaluate]` correspond to the `.pt` of the model we trained and we want to evaluate now
+- `[results_path]`, usually set to the same value as `[model_to_evaluate]` correspond to the path were the inference logits will be saved
+- `[test_file]` correspond to the `.tsv` we want to evaluate. Usually it is simple `test.tsv`
+
+## 6: Saving trained models on `onnx` format
+To be able to run the inference on the trained models outside the fairseq signal environoment, we can use the followwing command
+```shell script
+$ CUDA_VISIBLE_DEVICES=[device_num] fairseq-hydra-save common.fp16=[use_fp16] \
+    common_eval.path=[model_to_evaluate] model.num_labels=[num_labels] \
+    --config-dir examples/w2v_cmsc/config/finetuning/ecg_transformer --config-name eval
+```
+A file named `model.onnx` will be saved in the same folder as `[model_to_evaluate]`
+Once we have this `model.onnx` we can run it everywhere using the following code
+
+```
+import onnxruntime as ort
+import numpy as np
+
+
+model_name = 'model.onnx'
+
+def get_session(filename, use_gpu=False):
+    if use_gpu:
+        return ort.InferenceSession(filename, providers=["CUDAExecutionProvider"])
+    else:
+        return ort.InferenceSession(filename, providers=["CPUExecutionProvider"])
+    
+
+def run_session(session, X):
+    """
+    session: orn session, obtained from get_session
+    X: numpy array of shape (batch_size, 12, 2500) and dtype np.float16 ideally
+    """
+    input = {
+        session.get_inputs()[0].name: X,
+    }
+    output = session.run(None, input)
+    return output
+
+
+x = 0.00488*np.transpose(np.squeeze(X[0:15]), (0, 2, 1)).astype(np.float16)
+use_gpu=  False # can also be set to True
+session = get_session(model_name, use_gpu)
+y = run_session(session, x)
+print(y)
 ```
 
-Given a directory that contains .dat files from PTB-XL:
-```shell script
-$ python fairseq_signals/data/ecg/preprocess/preprocess_ptbxl.py \
-    /path/to/ptbxl/records500/ \
-    --dest /path/to/output
-```
-
-### Prepare data manifest
-Given a directory that contains pre-processed data:
-```shell script
-$ python fairseq_signals/data/ecg/preprocess/manifest.py \
-    /path/to/data/ \
-    --dest /path/to/manifest \
-    --valid-percent $valid
-```
-For patient identification:
-```shell script
-$ python fairseq_signals/data/ecg/preprocess/manifest_identification.py \
-    /path/to/data \
-    --dest /path/to/manifest \
-    --valid-percent $valid
-```
-Please fine more details about pre-processing and data manifest from [here](fairseq_signals/data/ecg/preprocess/README.md).
-
-## For multi-modal tasks (Multi-modal pre-training or ECG question answering)
-### Prepare ECG dataset
-We provide pre-processing codes for the following datasets.
-* [PTB-XL](https://physionet.org/content/ptb-xl/1.0.3/)
-* [MIMIC-IV-ECG](https://physionet.org/content/mimic-iv-ecg/1.0/)
-* [ECG-QA](https://github.com/Jwoo5/ecg-qa)
-
-### Pre-process
-For multi-modal pre-training of ECGs with reports using the **PTB-XL** dataset:
-```shell script
-$ python fairseq_signals/data/ecg_text/preprocess/preprocess_ptbxl.py \
-   /path/to/ptbxl \
-   --dest /path/to/output \
-```
-For multi-modal pre-training of ECGs with reports using the **MIMIC-IV-ECG** dataset:
-```shell script
-$ python fairseq_signals/data/ecg_text/preprocess/preprocess_mimic_iv_ecg.py \
-   /path/to/mimic-iv-ecg \
-   --dest /path/to/output \
-```
-
-For ECG Question Answering task with the ECG-QA dataset:
-* Map `ecg_id` to the corresponding ECG file path (you can find these scripts in the [ECG-QA repository](https://github.com/Jwoo5/ecg-qa))
-    * For PTB-XL-based ECG-QA:
-        ```shell script
-        $ python mapping_ptbxl_samples.py ecgqa/ptbxl \
-            --ptbxl-data-dir $ptbxl_dir \
-            --dest $dest_dir
-        ```
-    * For MIMIC-IV-ECG-based ECG-QA:
-        ```shell script
-        $ python mapping_mimic_iv_ecg_samples.py ecgqa/mimic-iv-ecg \
-            --mimic-iv-ecg-data-dir $mimic_iv_ecg_dir \
-            --dest $dest_dir
-        ```
-* Preprocess ECG-QA and prepare manifests
-    ```shell script
-    $ fairseq_signals/data/ecg_text/preprocess/preprocess_ecgqa.py /path/to/ecgqa \
-        --dest /path/to/output \
-        --apply_paraphrase
-    ```
-
-You don't need to run additional scripts to prepare manifest files for ECG-QA dataset since it automatically generates manifest files during the pre-processing process.
-
-### Prepare data manifest
-Given a directory that contains pre-processed PTB-XL data:
-```shell script
-$ python fairseq_signals/data/ecg_text/preprocess/manifest.py \
-    /path/to/data \
-    --dest /path/to/manifest \
-    --valid-percent $valid
-```
-Please find more details about pre-processing and data manifest [here](fairseq_signals/data/ecg_text/preprocess/README.md).
-
-## Examples
-We provide detailed READMEs for each model implementation:
-* [Multi-Modal Masked Autoencoders for Medical Vision-and-Language Pre-Training](examples/m3ae/README.md)
-* [Multi-modal Understanding and Generation for Medical Images and Text via Vision-Language Pre-Training](examples/medvill/README.md)
-* [Lead-agnostic Self-supervised Learning for Local and Global Representations of Electrocardiogram](examples/w2v_cmsc/README.md)*
-* [3KG: Contrastive Learning of 12-Lead Electrocardiograms using Physiologically-Inspired Augmentations](examples/3kg/README.md)
-* [CLOCS: Contrastive Learning of Cardiac Signals Across Space, Time, and Patients](examples/cmsc/README.md)
-* [wav2vec 2.0: A Framework for Self-supervised Learning of Speech Representations](examples/wav2vec2/README.md)
-* [A Simple Framework for Contrastive Learning of Visual Representations](examples/simclr/README.md)
-
-\* denotes for an official implementation
-
-# Contact
-If you have any questions or recommendations, please contact us via an issue or an e-mail.
-* ojw0123@kaist.ac.kr
