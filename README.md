@@ -3,6 +3,10 @@
 This is an adaption of the [`Fairseq-signals`](https://github.com/Jwoo5/fairseq-signals) for Heartwise.
 
 It is highly recommended to create a dedicated conda environment before installing the following libraries
+```
+$ conda create --name fairseq python=3.9
+$ conda activate fairseq
+```
 
 # Requirements and Installation
 * [PyTorch](https://pytorch.org) version >= 1.5.0
@@ -22,44 +26,43 @@ pip install omegaconf==2.0.5 hydra-core==1.0.4
 * **To build cython components**: `python setup.py build_ext --inplace`
 * **For large datasets** install [PyArrow](https://arrow.apache.org/docs/python/install.html#using-pip): `pip install pyarrow`
 
-It is highly recommended to create a dedicated conda environment before installing the following libraries
 
 # Getting Started
-For general commands on ecg preprocessing, model pretraining and other fairseq-signals specific, please check [`Fairseq-signals`](https://github.com/Jwoo5/fairseq-signals).
-Here we will focus on explaining how to train your own classification models end-to-end or initializing weights from DeepECG-SSL (both linear probing and finetuning),
-how to do inference of the models within fairseq-signals and how to save models in onnx formats so they can be used anywhere else for inference. 
+For general commands on ECG preprocessing, model pretraining, and other fairseq-signals specifics, please check [`Fairseq-signals`](https://github.com/Jwoo5/fairseq-signals).
+Here we will focus on explaining how to train your own classification models either end-to-end or with initialization from DeepECG-SSL weights (both linear probing and fine-tuning), run inference with models within fairseq-signals, and save models in ONNX format so they can be used elsewhere for inference. 
 
-## 1: Install fairseq-signals
-Here we assumed you cloned the project and install the different modules as described in the Requirements and Installation section
-## 2: Finetune DeepECG-SSL
-This will update all the weights (base model + classification head)
+To get the best of `DeepECG-SSL`, please make sure you prepreocessed ECGs as described by [Nolin-Lapalme et al.](https://www.medrxiv.org/content/10.1101/2025.03.02.25322575v1.full.pdf).
+A docker with the preprocessing pipeline can be find [here](https://github.com/HeartWise-AI/DeepECG_Docker)
+
+## 1.a: Fine-tune DeepECG-SSL
+This will update all the weights (base model + classification head).
 ```shell script
 $ CUDA_VISIBLE_DEVICES=[device_num] fairseq-hydra-train common.fp16=[use_fp16] task.data=[manifest_folder] \
     model.model_path=[deepecg-ssl-path] +task.npy_dataset=true model.num_labels=[num_labels] \
     criterion._name=[loss_name] checkpoint.save_dir=[checkpoint_dir] \
     --config-dir examples/w2v_cmsc/config/finetuning/ecg_transformer --config-name diagnosis
 ```
-- `[device_num]` should be an integer representing the cuda gpu number (starting at 0)
+- `[device_num]` should be an integer representing the CUDA GPU number (starting at 0)
 - `[use_fp16]` should be either `true` for `false`. When finetuning `DeepECG-SSL`, use `true`
-- `[manifest_folder]` is a folder containing at least two manifest files `train.tsv` and `valid.tsv`, in the section `Manifest structure` we will give example of this file
-- `[deepecg-ssl-path]` is the .pt corresponding to `DeepECG-SSL` base model. The `valid` set is used to earlystop the finetuning.
-- `[+task.npy_dataset=true]`: in case your training/validation data are save in a panda array, replace this with `[+task.df_dataset=true]`
-- `[num_labels]` is an integer corresponding to the number of target class in the classification. For binary classification, `[num_labels] = 1`
-- `[loss_name]` correspond to the loss function. Possible values are `as` (asymetric loss), `bf` (binary focal loss), `mse` (mean square error loss), `bce` (binary cross entropy with logits loss), and `mlsml` (multilabel soft marginal loss)
-- `[checkpoint_dir]` is the checkpoint directory subfolder name inside the folder `outputs/`. fairseq-signals automatically classify folder using the date and time when they are created
+- `[manifest_folder]` is a folder containing at least two manifest files `train.tsv` and `valid.tsv`. In the section `Manifest structure` we will give an example of these files.
+- `[deepecg-ssl-path]` is the `.pt` corresponding to `DeepECG-SSL` base model. The `valid` set is used to early-stop the fine-tuning.
+- `[+task.npy_dataset=true]` in case your training/validation data are save in a panda dataframe, replace this with `[+task.df_dataset=true]`.
+- `[num_labels]` is an integer corresponding to the number of target classes in the classification. For binary classification, `[num_labels] = 1`.
+- `[loss_name]` corresponds to the loss function. Possible values are `as` (asymetric loss), `bf` (binary focal loss), `mse` (mean square error loss), `bce` (binary cross entropy with logits loss), and `mlsml` (multilabel soft marginal loss).
+- `[checkpoint_dir]` is the checkpoint directory subfolder name inside the folder/ `outputs/`. fairseq-signals automatically organizes folders using the date and time when they are created.
 
-## 3: Linear evaluation with DeepECG-SSL
-This will freez the base model weights and only update classification weights
+## 1.b: Linear probing with DeepECG-SSL
+This will freeze the base model weights and only update classification weights
 ```shell script
 $ CUDA_VISIBLE_DEVICES=[device_num] fairseq-hydra-train common.fp16=[use_fp16] task.data=[manifest_folder] \
     model.model_path=[deepecg-ssl-path] model.linear_evaluation=true +task.npy_dataset=[npy_dataset] \
     model.num_labels=[num_labels] criterion._name=[loss_name] checkpoint.save_dir=[checkpoint_dir] \
     --config-dir examples/w2v_cmsc/config/finetuning/ecg_transformer --config-name diagnosis
 ```
-All parameters are the same as for finetuning, expect `model.linear_evaluation` whose value is `true`
+All parameters are the same as for fine-tuning, except `model.linear_evaluation` whose value is `true`
 
-## 4: End to end model
-In case you want to initialized all the weights (base transformer + classification head) randomnly, in other to perform end-to-end training, you the following
+## 1.c: End-to-end training
+In case you want to initialize all the weights (base transformer + classification head) randomly in order to perform end-to-end training, you the following.
 ```shell script
 $ CUDA_VISIBLE_DEVICES=[device_num] fairseq-hydra-train common.fp16=[use_fp16] task.data=[manifest_folder] \
     model.no_pretrained_weights=true +task.npy_dataset=[npy_dataset] model.num_labels=[num_labels] \
@@ -68,8 +71,8 @@ $ CUDA_VISIBLE_DEVICES=[device_num] fairseq-hydra-train common.fp16=[use_fp16] t
 ```
 All parameters are the same as for finetuning, expect `model.no_pretrained_weights=true` and `[deepecg-ssl-path]`, the base model path, which is not set, as it is not needed.
 
-## 5: Inference of trained models
-Once you trained your model, either by finetuiing, linear evalution or end-to-end, the final checkpoint is saved in the corresponding directory (specified with `[checkpoint_dir]`
+## 2: Inference of trained models
+Once you have trained your model, either by fine-tuning, linear probing or end-to-end, the final checkpoint is saved in the corresponding directory (specified with `[checkpoint_dir]`
 Now you can run the inference on a given `.tsv` file that specifies your test data.
 ```shell script
 $ CUDA_VISIBLE_DEVICES=[device_num] fairseq-hydra-inference task.data=[manifest_folder] \
@@ -81,15 +84,15 @@ $ CUDA_VISIBLE_DEVICES=[device_num] fairseq-hydra-inference task.data=[manifest_
 - `[results_path]`, usually set to the same value as `[model_to_evaluate]` correspond to the path were the inference logits will be saved
 - `[test_file]` correspond to the `.tsv` we want to evaluate. Usually it is simple `test.tsv`
 
-## 6: Saving trained models on `onnx` format
-To be able to run the inference on the trained models outside the fairseq signal environoment, we can use the followwing command
+## 3: Saving trained models on `onnx` format
+To be able to run inference on the trained models outside fairseq-signals envirnoment, we can use the following command.
 ```shell script
 $ CUDA_VISIBLE_DEVICES=[device_num] fairseq-hydra-save common.fp16=[use_fp16] \
     common_eval.path=[model_to_evaluate] model.num_labels=[num_labels] \
     --config-dir examples/w2v_cmsc/config/finetuning/ecg_transformer --config-name eval
 ```
 A file named `model.onnx` will be saved in the same folder as `[model_to_evaluate]`
-Once we have this `model.onnx` we can run it everywhere using the following code
+Having this file, we can run it everywhere using the following code.
 
 ```
 import onnxruntime as ort
@@ -118,9 +121,18 @@ def run_session(session, X):
 
 
 x = 0.00488*np.transpose(np.squeeze(X[0:15]), (0, 2, 1)).astype(np.float16)
-use_gpu=  False # can also be set to True
+use_gpu = False # can also be set to True
 session = get_session(model_name, use_gpu)
 y = run_session(session, x)
 print(y)
 ```
 
+
+## Example of manifest files
+`train.tsv` for a classification task with `num_labels=2`. Note that the `#` used in the file are only for description. `.tsv` does not support comments. 
+```
+x_path: [path_to_ecgs] #shape expected is (n_ecgs, 2500, 12)
+x_shape:(2500, 12, 1)
+y_path:[path_to_labels] # expected shape is (n_ecgs, n_labels_or_more)
+label_indexes:[0, 5]  #in this case we extract columns 0 and 5 to be our labels
+```
