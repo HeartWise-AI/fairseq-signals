@@ -22,13 +22,13 @@ ROOT_DIR_NAS='/media/data1/achilsowa/results/fairseq/outputs/'
 ROOT_DIR_VOL='/volume/deepecg/fairseq-signals/outputs/'
 ROOT_DIR = 'nas'
 EVAL_CI = FORMAT = False
-DEVICE = "cuda:0"
+DEVICE = "cuda:1"
 N_PERM = 1000
 RATIO = 0.7
 
-TASKS = ['labels_77', 'afib_5', 'lvef_40', 'lvef_50', 'lqts', 'lqts_type']
-DATASETS = ['mhi', 'mimic', 'ptb', 'ukb', 'clsa', 'external_public', 'uw', 'ucsf', 'jgh', 'nyp', 'hms', 'cshs', 'external_private', 'external']
-MODELS = ['sl', 'ssl']
+TASKS = ['labels_77', 'afib_5', 'lvef_40', 'lvef_50', 'lqts', 'lqts_type', 'labels_47', 'labels_14']
+DATASETS = ['mhi', 'mimic', 'ptb', 'ukb', 'clsa', 'external_public', 'uw', 'ucsf', 'jgh', 'nyp', 'hms', 'cshs', 'chum', 'external_private', 'external', 'train']
+MODELS = ['sl', 'e2e-sl', 'ssl', 'e2e-ssl', 'ecg-founder', 'ecg-fm']
 SINGLETON = {}
 
 
@@ -128,11 +128,11 @@ def calculate_metrics(y_true, y_pred, device, y_labels, categories, single=True,
     t_y_true = torch.tensor(y_true, device=device, dtype=torch.long)
     t_y_pred = torch.tensor(y_pred, device=device, dtype=torch.float)
     t_y_pred_threshold = torch.tensor(y_pred_thresholded, device=device, dtype=torch.long)
-    # t_y_pred_threshold_youden = (
-        # torch.tensor(y_pred_thresholded_youden, device=device, dtype=torch.long)
-        # if youden_threshold
-        # else None
-    # )
+    t_y_pred_threshold_youden = (
+        torch.tensor(y_pred_thresholded_youden, device=device, dtype=torch.long)
+        if youden_threshold
+        else None
+    )
     scores = {"tm": {}}
     task = "binary"
     
@@ -645,6 +645,9 @@ def get_pred_labels(
             y_true = y_true.reshape(-1, 1)
 
         y_true = y_true[:, y_idx]
+    
+    if np.any(y_pred < 0):
+        y_pred = stable_sigmoid(y_pred)
     return y_pred, y_true
 
 def get_scores(y_pred, y_true, y_labels, categories,  task='classification'):
@@ -785,7 +788,7 @@ def merge_public_ds_scores():
 
 
 
-def plot_histo(models, categories, title, filename, metric='auroc'):
+def plot_histo_old(models, categories, title, filename, metric='auroc'):
     # Sample data
     # Sample data
     def get_fig_width():
@@ -836,7 +839,89 @@ def plot_histo(models, categories, title, filename, metric='auroc'):
 
 
 
-def plot_spider(models, categories, title, filename, y_start=70, fontsize=16, fig_size=None):
+def plot_histo(models, categories, title, filename, fontsize=16, y_start=.50, y_end=1.00, hide_last_y=False, show_p_value=False, metric='auroc'):
+    # Sample data
+    # Sample data
+    def get_fig_width():
+        len_cat = len(categories)
+        return len_cat + 3
+    # Set up bar positions
+    x = np.arange(len(categories))
+    width = 0.35  # Width of the bars
+
+    # Create the figure and axes
+    fig, ax = plt.subplots(figsize=(get_fig_width(), 6))
+
+    # Plot bars without error caps using seaborn for improved aesthetics
+    # The radar chart needs the data to be a closed loop, so append the start to the end.
+    for model in models:          
+        scores = model['df'].loc[list(categories.keys()), 'Mean'].tolist()
+        cis = model['df'].loc[list(categories.keys()), '95% CI'].tolist()
+        model['scores'] = scores
+        model['cis'] = [eval(ci.replace('-', ',')) for ci in cis]
+        if show_p_value:
+            if 'p_value' in model['df'].columns:
+                model['p_values'] = model['df'].loc[list(categories.keys()), 'p_value'].tolist()
+
+    # Plot each model’s data on the radar chart
+    gap = 0.01
+    m1, m2 = models[0], models[1]
+    bars_m1 = ax.bar(x - width/2 - gap, m1['scores'], width, label=m1['title'], color=m1['color'])
+    bars_m2 = ax.bar(x + width/2 + gap, m2['scores'], width, label=m2['title'], color=m2['color'])
+
+    # Add thin vertical lines for CI
+    for i in range(len(categories)):
+        ax.vlines(x[i] - width/2, m1['cis'][i][0], m1['cis'][i][1], color='gray', linewidth=1)
+        ax.vlines(x[i] + width/2, m2['cis'][i][0], m2['cis'][i][1], color='gray', linewidth=1)
+        
+        # Calculate and add delta (difference) text
+        delta = round(m2['scores'][i] - m1['scores'][i], 2)
+        y_position = max(m1['cis'][i][1], m2['cis'][i][1]) + 0.5  # Position above bars
+        if show_p_value:
+            p_val_text = "P < 0.001" if m2['p_values'][i] < 0.001 else f"P = {m2['p_values'][i]:.3f}"
+            ax.hlines(y_position+0.5, i - width + gap*5 , i + width - gap*5, color='black', linewidth=1)
+            ax.text(x[i], y_position+1., p_val_text, ha='center', va='bottom', fontsize=fontsize, color='black')
+        else:
+            ax.text(x[i], y_position, f'Δ={delta}', ha='center', va='bottom', fontsize=fontsize, color='black')
+
+    # Add values inside the bars
+    for bar in bars_m1:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width() / 2, height - 10, f'{height:.2f}', ha='center', va='bottom', color='white', rotation=70, fontsize=fontsize - 6*0)
+
+    for bar in bars_m2:
+        height = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width() / 2, height - 10, f'{height:.2f}', ha='center', va='bottom', color='white', rotation=70, fontsize=fontsize - 6*0)
+
+    # Labeling and aesthetics
+    #ax.set_xlabel('Categories')
+    ax.set_ylabel(metric.upper(), fontsize=fontsize)
+    ax.set_title(title, fontsize=fontsize)
+    ax.set_xticks(x)
+    ax.set_xticklabels(categories.values(), rotation=15, ha='right', fontsize=fontsize)
+    ax.tick_params(axis='y', labelsize=fontsize-2)
+    #ax.legend(loc='upper left')
+
+    # Show plot
+    plt.ylim(y_start, y_end)
+    if hide_last_y:
+        ax.yaxis.get_major_ticks()[-1].draw = lambda *args:None
+    # plt.tight_layout()
+    # plt.savefig(f"/volume/deepecg/fairseq-signals/metrics/images/{filename}.png", format="png", dpi=300)  # Save as a high-quality PNG file
+    
+    plt.show()
+
+
+def save_pred_in_df(df, ds, task, save_gt=False):
+    y_pred, y_true = ds.get_y(task)
+    for idx, label in enumerate(task.labels):
+        df[f'{label}_pred'] = y_pred[:, idx] 
+        if save_gt: 
+            df[f'{label}_gt'] = y_true[:, idx] 
+    return df
+
+
+def plot_spider(models, categories, title, filename, y_start=.70, y_end=1.00, fontsize=16, num_ticks=5, fig_size=None):
     
     def get_fig_width():
         if fig_size is not None:
@@ -889,7 +974,7 @@ def plot_spider(models, categories, title, filename, y_start=70, fontsize=16, fi
 
 
     # Set the range for the radial axis (AUC percentage from 0 to 100)
-    ax.set_ylim(y_start, 100)
+    ax.set_ylim(y_start, y_end, num_ticks)
     ax.tick_params(axis='y', labelsize=fontsize)
     # Remove default x-ticks as we use custom labels
     #ax.set_xticks([])
@@ -968,3 +1053,15 @@ def sl_ssl_ds_size(tasks, title, start_y=70, fontsize=15, metric='auroc'):
 
 
 
+def is_in(v, interval):
+        return interval[0]<=v and v <= interval[1]
+def delta(mean1, ci1, mean2, ci2):
+    diff = float(mean2)-float(mean1)
+    ci1_f = eval(ci1.replace(' - ', ',')) if isinstance(ci1, str) else ci1 
+    ci2_f = eval(ci2.replace(' - ', ',')) if isinstance(ci2, str) else ci2 
+
+    signif = -1 if diff < 0 else 1
+    #diff = f'+{diff}' if diff > 0 else f'-{diff}'
+    if is_in(ci1_f[0] , ci2_f) or is_in(ci1_f[1], ci2_f) or is_in(ci2_f[0], ci1_f) or is_in(ci2_f[1], ci1_f):
+        signif = 0
+    return diff, signif

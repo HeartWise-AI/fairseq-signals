@@ -11,9 +11,9 @@ This is an adaption of the [`Fairseq-signals`](https://github.com/Jwoo5/fairseq-
 ```bash
 git clone https://github.com/HeartWise-AI/fairseq-signals
 cd fairseq-signals
+pip install pip==24.0
 pip install --editable ./
-pip install omegaconf==2
-pip install hydra-core==1
+pip install omegaconf==2.0.5 hydra-core==1.0.4
 ```
 
 * **To preprocess ECG datasets**: `pip install pandas scipy wfdb`
@@ -21,7 +21,22 @@ pip install hydra-core==1
 * **For large datasets** install [PyArrow](https://arrow.apache.org/docs/python/install.html#using-pip): `pip install pyarrow`
 
 # Getting Started
+For general command on ecg preprocessing and other fairseq-signals specific, please check [`Fairseq-signals`](https://github.com/Jwoo5/fairseq-signals).
+
+Here we will focus on explaining how to train your own models based on DeepECG-SSL (both linear probing and finetuning),
+how to do inference of the models within fairseq-signals and how to save models in onnx formats so they can be used anywhere else for inference. 
+
+## Step 1: Install fairseq-signals
+Here we assumed you cloned the project and install the different modules as described in the Requirements and Installation section
+## Step2: Finetune DeepECG-SSL
 Once you've deployed fairseq-signals, you can either load DeepECG-SSL fondation model and use it in your personal training pipeline or rely on fairseq-cli to finetune DeepECG-SSL and to do inference on finetuned models
+```shell script
+$ CUDA_VISIBLE_DEVICES=0 fairseq-hydra-train common.fp16=[use_fp16] task.data=[manifest_folder] \
+    model.model_path=[deepecg-ssl-path] +task.npy_dataset=[npy_dataset] model.num_labels=[num_labels] \
+    criterion._name=[loss_name] checkpoint.save_dir=[checkpoint-prefix] \
+    --config-dir examples/w2v_cmsc/config/finetuning/ecg_transformer --config-name diagnosis
+```
+
 ## Choice 1: Load DeepECG-SSL and you it in your pipeline
 We provide a notebook with example usage
 ## Choice 2: Use fairseq-cli

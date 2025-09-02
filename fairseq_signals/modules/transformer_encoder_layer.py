@@ -29,8 +29,8 @@ class TransformerEncoderLayer(nn.Module):
         self.activation_dropout = activation_dropout
 
         #@achil
-        def gelu(x: torch.Tensor) -> torch.Tensor:
-            return F.gelu(x.float()).type_as(x)
+        # def gelu(x: torch.Tensor) -> torch.Tensor:
+        #     return F.gelu(x.float()).type_as(x)
         self.activation_fn = gelu
         self.self_attn = MultiHeadAttention(
             self.embed_dim,

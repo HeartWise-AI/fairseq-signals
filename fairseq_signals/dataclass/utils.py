@@ -462,7 +462,7 @@ def merge_with_parent(dc: Dataclass, cfg: Dataclass, remove_missing=False):
     
         with open_dict(cfg):
             remove_missing_rec(cfg, dc)
-
+    
     merged_cfg = OmegaConf.merge(dc, cfg)
     merged_cfg.__dict__["_parent"] = cfg.__dict__["_parent"]
     OmegaConf.set_struct(merged_cfg, True)

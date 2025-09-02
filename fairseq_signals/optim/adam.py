@@ -32,6 +32,7 @@ class AdamConfig(Dataclass):
     )
     lr: List[float] = II("optimization.lr")
 
+
 @register_optimizer("adam", dataclass = AdamConfig)
 class Adam(Optimizer):
     """Adam optimizer for fairseq_signals.

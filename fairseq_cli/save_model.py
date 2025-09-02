@@ -8,7 +8,7 @@ from omegaconf import DictConfig
 
 import numpy as np
 import torch
-import dill
+import cloudpickle
 import io
 
 from fairseq_signals import distributed_utils
@@ -19,6 +19,19 @@ from fairseq_signals.logging import progress_bar
 from fairseq_signals.dataclass.configs import Config
 from fairseq_signals.utils.utils import reset_logging
 from fairseq_signals.utils.store import initialize_store, store
+
+
+class OnnxExportWrapper(torch.nn.Module):
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
+
+    def forward(self, source, ):
+        # Create the dictionary that the original model expects
+        net_input = {"source": source, "padding_mask": None}
+        net_output = self.model(**net_input)
+        return self.model.get_logits(net_output)
+
 
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -51,7 +64,7 @@ def main(cfg: DictConfig, override_args=None):
     else:
         overrides = {}
 
-    overrides.update({"task": {"data": cfg.task.data}})
+    # overrides.update({"task": {"data": cfg.task.data}})
     model_overrides = eval(getattr(cfg.common_eval, "model_overrides", "{}"))
     overrides.update(model_overrides)
 
@@ -65,6 +78,8 @@ def main(cfg: DictConfig, override_args=None):
         suffix=cfg.checkpoint.checkpoint_suffix
     )
     save_path = os.path.join(os.path.dirname(cfg.common_eval.path), 'model.pt')
+    save_dict_path = os.path.join(os.path.dirname(cfg.common_eval.path), 'model_state_dict.pt')
+    save_path_onnx = os.path.join(os.path.dirname(cfg.common_eval.path), 'model.onnx')
 
     logger.info(
         "num. shared model params: {:,} (num. trained: {:,})".format(
@@ -81,23 +96,40 @@ def main(cfg: DictConfig, override_args=None):
     )
 
     # Move model to GPU
+    net_input = {"source": torch.rand(1, 12, 2500), "padding_mask": None}
+    wrapped_model = OnnxExportWrapper(model)
+
     model.eval()
+    wrapped_model.eval()
     if use_fp16:
+        net_input["source"] = net_input["source"].to(dtype=torch.float16)
         model.half()
-    if use_cuda:
+        wrapped_model.half()
+    if use_cuda:        
         model.cuda()
+        wrapped_model.cuda()
+        net_input["source"] = net_input["source"].to('cuda')
+    
+    with torch.no_grad():
+        torch.save(model.state_dict(), save_dict_path)
+        torch.save(model, save_path, pickle_module=cloudpickle)
+    
 
-    with open(save_path, 'wb') as file:
-        torch.save(model, file, pickle_module=dill)
-        #dill.dump(model, file)
+        torch.onnx.export(
+            wrapped_model,
+            (net_input["source"], ),
+            save_path_onnx,
+            verbose=True,
+            # opset_version=17,
+            input_names=["source",],
+            dynamic_axes={"source": {0: "batch_size", 2: "input_length"}}
+        )
 
-    dummy_input = torch.randn(1, 12, 2500).to("cuda")
-    traced_model = torch.jit.trace(model, dummy_input)
-    traced_model.save(save_path)
-    model = torch.jit.load(save_path)
-    #with open(save_path, 'rb') as file:
-        #rmodel = dill.load(file)
-    #model = torch.load(save_path, pickle_module=dill)
+    
+    # with open(save_path, 'wb') as file:
+    #     torch.save(model, file, pickle_module=cloudpickle)
+    #     # torch.save(model, file, pickle_module=dill)
+    #     # dill.dump(model, file)
 
     logger.info(f"saving model to {save_path}")
     
