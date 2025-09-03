@@ -72,7 +72,7 @@ $ CUDA_VISIBLE_DEVICES=[device_num] fairseq-hydra-train common.fp16=[use_fp16] t
 All parameters are the same as for finetuning, expect `model.no_pretrained_weights=true` and `[deepecg-ssl-path]`, the base model path, which is not set, as it is not needed.
 
 ## 2: Inference of trained models
-Once you have trained your model, either by fine-tuning, linear probing or end-to-end, the final checkpoint is saved in the corresponding directory (specified with `[checkpoint_dir]`
+Once you have trained your model, either by fine-tuning, linear probing or end-to-end, the final checkpoint is saved in the corresponding directory (specified with `[checkpoint_dir]`)
 Now you can run the inference on a given `.tsv` file that specifies your test data.
 ```shell script
 $ CUDA_VISIBLE_DEVICES=[device_num] fairseq-hydra-inference task.data=[manifest_folder] \
