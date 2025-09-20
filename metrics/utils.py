@@ -974,7 +974,7 @@ def plot_spider(models, categories, title, filename, y_start=.70, y_end=1.00, fo
 
 
     # Set the range for the radial axis (AUC percentage from 0 to 100)
-    ax.set_ylim(y_start, y_end, num_ticks)
+    ax.set_ylim(ymin=y_start, ymax=y_end) #, num_ticks)
     ax.tick_params(axis='y', labelsize=fontsize)
     # Remove default x-ticks as we use custom labels
     #ax.set_xticks([])
